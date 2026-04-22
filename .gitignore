@@ -1,0 +1,12 @@
+node_modules/
+.env
+data.json
+scan-history.tsv
+client/node_modules/
+client/dist/
+server_out.log
+server_new.log
+client/client_out.log
+client/client_new.log
+*.log
+.DS_Store
