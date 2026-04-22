@@ -10,3 +10,4 @@ client/client_out.log
 client/client_new.log
 *.log
 .DS_Store
+logs/
