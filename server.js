@@ -55,6 +55,7 @@ const settings = {
   locations: (process.env.JOB_LOCATIONS || "Seattle,Washington").split(",").map((s) => s.trim()),
   intervalMinutes: parseInt(process.env.INTERVAL_MINUTES || "5", 10),
   maxApplicationsPerRun: parseInt(process.env.MAX_APPS_PER_RUN || "10", 10),
+  maxBrowserOpensPerCycle: parseInt(process.env.MAX_BROWSER_OPENS || "5", 10),
   emailNotifications: process.env.EMAIL_NOTIFICATIONS === "true",
   // Which platforms to scrape (all enabled by default)
   platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true },
@@ -413,7 +414,9 @@ function getMockJobs(title, location) {
 }
 
 // ─── Application logic ───────────────────────────────────────────────────────
-async function applyToJob(job) {
+let browserOpensThisCycle = 0;   // reset each cycle — caps how many tabs open at once
+
+async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
   const alreadyApplied = applications.some((a) => a.jobId === job.id);
   if (alreadyApplied) return false;
 
@@ -422,6 +425,19 @@ async function applyToJob(job) {
 
   const applyUrl = job.applyUrl || job.url || "";
   const hasCredentials = settings.linkedinEmail && settings.linkedinPassword;
+  const platform = detectPlatform(applyUrl);
+
+  // Cap browser opens per cycle — LinkedIn/Indeed auto-apply don't count toward limit
+  const wouldOpenBrowser = platform !== "linkedin" && platform !== "indeed";
+  if (wouldOpenBrowser && browserOpensThisCycle >= maxBrowserOpens) {
+    // Save as queued-manual — user can trigger manually from dashboard
+    const record = buildRecord(job, "queued-manual", null);
+    applications.unshift(record);
+    if (applications.length > 1000) applications.splice(1000);
+    stats.applied++;
+    saveData({ applications, logs });
+    return true;
+  }
 
   if (settings.autoApplyEnabled && hasCredentials && applyUrl) {
     try {
@@ -441,11 +457,13 @@ async function applyToJob(job) {
         status = "auto-applied";
         log("success", `Auto-applied: ${job.title} @ ${job.company}`, autoApplyResult.reason);
       } else if (autoApplyResult.simplifyUsed && autoApplyResult.browserOpened) {
-        status = "simplify-opened"; // opened in Chrome with Simplify filling the form
-        log("info", `Simplify opened: ${job.title} @ ${job.company} — form pre-filled`);
+        status = "simplify-opened";
+        browserOpensThisCycle++;
+        log("info", `Simplify opened (${browserOpensThisCycle}): ${job.title} @ ${job.company}`);
       } else if (autoApplyResult.browserOpened) {
         status = "browser-opened";
-        log("info", `Opened browser: ${job.title} @ ${job.company}`);
+        browserOpensThisCycle++;
+        log("info", `Browser opened (${browserOpensThisCycle}): ${job.title} @ ${job.company}`);
       } else {
         status = "apply-failed";
         log("warning", `Auto-apply failed: ${job.title} @ ${job.company}`, autoApplyResult.reason);
@@ -456,7 +474,16 @@ async function applyToJob(job) {
     }
   }
 
-  const record = {
+  const record = buildRecord(job, status, autoApplyResult);
+  applications.unshift(record);
+  if (applications.length > 1000) applications.splice(1000);
+  stats.applied++;
+  saveData({ applications, logs });
+  return true;
+}
+
+function buildRecord(job, status, autoApplyResult) {
+  return {
     id: Date.now() + Math.random(),
     jobId: job.id,
     title: job.title,
@@ -464,6 +491,7 @@ async function applyToJob(job) {
     location: job.location,
     url: job.url,
     platform: job.platform,
+    atsProvider: job.atsProvider || "",
     easyApply: job.easyApply,
     postedAt: job.postedAt,
     description: job.description || "",
@@ -472,16 +500,12 @@ async function applyToJob(job) {
     workMode: job.workMode || "",
     jobType: job.jobType || "",
     via: job.via || "",
+    score: job.score,
+    scoreLabel: job.scoreLabel,
     status,
     appliedAt: new Date().toISOString(),
     autoApplyNote: autoApplyResult?.reason || "",
   };
-
-  applications.unshift(record);
-  if (applications.length > 1000) applications.splice(1000);
-  stats.applied++;
-  saveData({ applications, logs });
-  return true;
 }
 
 // ─── Save all found jobs (for manual review in dashboard) ────────────────────
@@ -531,6 +555,8 @@ function saveFoundJob(job) {
 async function runCycle() {
   log("info", "Automation cycle started");
   let newThisCycle = 0;
+  browserOpensThisCycle = 0;  // reset browser-open counter each cycle
+  const maxBrowserOpens = settings.maxBrowserOpensPerCycle ?? 5;
 
   // ── 1. Apify + SerpAPI scrapers (per title/location) ──
   for (const title of settings.jobTitles) {
@@ -542,7 +568,7 @@ async function runCycle() {
 
       for (const job of jobs) {
         saveFoundJob(job);
-        const applied = await applyToJob(job);
+        const applied = await applyToJob(job, { maxBrowserOpens });
         if (applied) {
           newThisCycle++;
           log("success", `Queued: ${job.title} @ ${job.company} [${job.platform}]`, job.location);
@@ -562,7 +588,7 @@ async function runCycle() {
       stats.found += atsJobs.length;
       for (const job of atsJobs) {
         saveFoundJob(job);
-        const applied = await applyToJob(job);
+        const applied = await applyToJob(job, { maxBrowserOpens });
         if (applied) {
           newThisCycle++;
           log("success", `Queued (ATS): ${job.title} @ ${job.company}`, job.atsProvider);
@@ -659,7 +685,7 @@ app.get("/api/logs", (req, res) => {
 app.get("/api/stats", (req, res) => res.json(stats));
 
 app.post("/api/settings", (req, res) => {
-  const allowed = ["jobTitles", "locations", "intervalMinutes", "maxApplicationsPerRun", "emailNotifications", "notifyEmail", "platforms"];
+  const allowed = ["jobTitles", "locations", "intervalMinutes", "maxApplicationsPerRun", "maxBrowserOpensPerCycle", "emailNotifications", "notifyEmail", "platforms", "autoApplyEnabled"];
   for (const key of allowed) {
     if (req.body[key] !== undefined) settings[key] = req.body[key];
   }
