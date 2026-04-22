@@ -1,16 +1,25 @@
 import { chromium } from "playwright";
 import fs from "fs";
+import path from "path";
+import os from "os";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 // ─── Shared browser state ─────────────────────────────────────────────────────
 let _browser = null;
 let _linkedinContext = null;
 let _indeedContext = null;
+let _simplifyContext = null;   // persistent Chrome context with Simplify extension
 
 export async function resetSession() {
   if (_browser) await _browser.close().catch(() => {});
   _browser = null;
   _linkedinContext = null;
   _indeedContext = null;
+  if (_simplifyContext) await _simplifyContext.close().catch(() => {});
+  _simplifyContext = null;
 }
 
 async function getBrowser() {
@@ -46,8 +55,9 @@ export async function smartApply({ job, credentials, profile, resumePath }) {
   if (platform === "indeed") {
     return applyIndeed({ jobUrl: applyUrl, credentials, profile, resumePath });
   }
-  // For other platforms — open the browser so the user can apply with one click
-  return openBrowserToApply(applyUrl, job);
+  // For all other platforms (Greenhouse, Lever, Ashby, Workday, Glassdoor, etc.)
+  // Open in Chrome with Simplify extension — it auto-fills every form field
+  return openWithSimplify(applyUrl, job);
 }
 
 // ─── LinkedIn Easy Apply ──────────────────────────────────────────────────────
@@ -274,18 +284,133 @@ export async function applyIndeed({ jobUrl, credentials, profile, resumePath }) 
   }
 }
 
-// ─── Fallback — open browser to job URL ──────────────────────────────────────
-async function openBrowserToApply(url, job) {
+// ─── Simplify integration ─────────────────────────────────────────────────────
+// Opens job in Chrome with Simplify extension active.
+// Simplify auto-fills every form field (Workday, Greenhouse, Lever, Ashby, etc.)
+// Two modes controlled by SIMPLIFY_MODE env var:
+//   "playwright" — Playwright controls Chrome, can optionally auto-submit
+//   "shell"      — Opens in existing Chrome window (default, most reliable)
+async function openWithSimplify(url, job) {
   if (!url) return { success: false, reason: "No URL available" };
+
+  const mode = process.env.SIMPLIFY_MODE || "shell";
+  const autoSubmit = process.env.SIMPLIFY_AUTO_SUBMIT === "true";
+
+  // ── Shell mode: open in running Chrome where Simplify is already active ──────
+  if (mode === "shell") {
+    try {
+      if (process.platform === "win32") {
+        await execAsync(`start "" "${url}"`);
+      } else if (process.platform === "darwin") {
+        await execAsync(`open -a "Google Chrome" "${url}"`);
+      } else {
+        await execAsync(`google-chrome "${url}" 2>/dev/null || xdg-open "${url}"`);
+      }
+      return {
+        success: false,
+        reason: "Opened in Chrome — Simplify will auto-fill all fields",
+        browserOpened: true,
+        simplifyUsed: true,
+        autoApplied: false,
+      };
+    } catch (err) {
+      return { success: false, reason: `Could not open Chrome: ${err.message}` };
+    }
+  }
+
+  // ── Playwright mode: launch Chrome with Simplify extension loaded ─────────────
   try {
-    const browser = await getBrowser();
-    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-    const page = await context.newPage();
+    if (!_simplifyContext) {
+      // Find Simplify extension in user's Chrome profile
+      const chromeExtDir = path.join(
+        os.homedir(),
+        "AppData", "Local", "Google", "Chrome", "User Data",
+        "Default", "Extensions",
+        "pbanhockgagggenencehbnadejlgchfc"
+      );
+
+      const extensionArgs = [];
+      if (fs.existsSync(chromeExtDir)) {
+        // Load from installed Chrome extension directory
+        const versions = fs.readdirSync(chromeExtDir).sort().reverse();
+        const extPath = path.join(chromeExtDir, versions[0]);
+        extensionArgs.push(
+          `--disable-extensions-except=${extPath}`,
+          `--load-extension=${extPath}`
+        );
+      }
+
+      // Use a dedicated automation profile to avoid conflicting with user's Chrome
+      const automationProfile = path.join(
+        os.homedir(),
+        "AppData", "Local", "Google", "Chrome", "User Data", "Automation"
+      );
+
+      _simplifyContext = await chromium.launchPersistentContext(automationProfile, {
+        channel: "chrome",
+        headless: false,
+        slowMo: 400,
+        args: [
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--start-maximized",
+          ...extensionArgs,
+        ],
+      });
+    }
+
+    const page = await _simplifyContext.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    // Leave page open for the user to review and apply
-    return { success: false, reason: "Opened in browser — apply manually", autoApplied: false, browserOpened: true };
+
+    // Give Simplify time to detect the form and fill all fields
+    await delay(5000, 1000);
+
+    if (autoSubmit) {
+      // Try to find and click the final Submit button
+      const submitBtn = page.locator([
+        "button[aria-label*='Submit']:visible",
+        "button:has-text('Submit application'):visible",
+        "button:has-text('Submit my application'):visible",
+        "button:has-text('Submit'):visible",
+        "input[type='submit']:visible",
+      ].join(", ")).first();
+
+      if (await isVisible(submitBtn)) {
+        await submitBtn.click();
+        await delay(2000);
+        return {
+          success: true,
+          reason: "Submitted via Simplify auto-fill + auto-submit",
+          autoApplied: true,
+          simplifyUsed: true,
+        };
+      }
+    }
+
+    // Leave open for user to review and click Submit
+    return {
+      success: false,
+      reason: "Opened in Chrome with Simplify — form pre-filled, click Submit to finish",
+      browserOpened: true,
+      simplifyUsed: true,
+      autoApplied: false,
+    };
+
   } catch (err) {
-    return { success: false, reason: `Could not open browser: ${err.message}` };
+    // Playwright mode failed — fall back to shell open
+    _simplifyContext = null;
+    try {
+      if (process.platform === "win32") await execAsync(`start "" "${url}"`);
+      else await execAsync(`open "${url}"`);
+      return {
+        success: false,
+        reason: "Chrome opened via fallback — Simplify will auto-fill",
+        browserOpened: true,
+        simplifyUsed: true,
+      };
+    } catch {
+      return { success: false, reason: `Simplify open failed: ${err.message}` };
+    }
   }
 }
 

@@ -38,6 +38,7 @@ function ScoreBadge({ score, label }) {
 const STATUS_META = {
   "auto-applied":       { bg: "#14532d", color: "#4ade80",  label: "✓ Auto Applied" },
   "easy-apply-pending": { bg: "#1e3a5f", color: "#60a5fa",  label: "⚡ Easy Apply" },
+  "simplify-opened":    { bg: "#2e1065", color: "#c084fc",  label: "✨ Simplify Filling" },
   "browser-opened":     { bg: "#1c1917", color: "#fb923c",  label: "🌐 Browser Opened" },
   "queued-manual":      { bg: "#1c1917", color: "#a8a29e",  label: "📋 Manual Queue" },
   "apply-failed":       { bg: "#450a0a", color: "#f87171",  label: "✕ Failed" },
@@ -177,21 +178,34 @@ function JobModal({ job, onClose, onApply }) {
         )}
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
           <a href={job.url} target="_blank" rel="noreferrer"
-            style={{ flex: 1, display: "block", textAlign: "center", padding: "10px",
+            style={{ flex: 1, minWidth: 140, display: "block", textAlign: "center", padding: "10px",
               background: "#4f46e5", color: "#fff", borderRadius: 8, fontWeight: 600,
               fontSize: 13, textDecoration: "none" }}>
             Open Job Posting ↗
           </a>
           {(job.status === "easy-apply-pending" || job.status === "apply-failed" || job.status === "queued-manual") && (
-            <button onClick={() => onApply(job)} style={{ flex: 1, padding: "10px",
+            <button onClick={() => onApply(job)} style={{ flex: 1, minWidth: 140, padding: "10px",
               background: "#166534", color: "#4ade80", borderRadius: 8, border: "none",
               fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
               ⚡ Auto-Apply Now
             </button>
           )}
+          {(job.platform === "ATS Direct" || job.status === "queued-manual" || job.status === "browser-opened") && (
+            <a href={job.url} target="_blank" rel="noreferrer"
+              style={{ flex: 1, minWidth: 140, display: "block", textAlign: "center", padding: "10px",
+                background: "#3b0764", color: "#c084fc", borderRadius: 8, fontWeight: 600,
+                fontSize: 13, textDecoration: "none", border: "1px solid #7c3aed" }}>
+              ✨ Open + Simplify Fills
+            </a>
+          )}
         </div>
+        {(job.platform === "ATS Direct" || job.status === "simplify-opened") && (
+          <div style={{ marginTop: 10, fontSize: 11, color: "#6b21a8", textAlign: "center" }}>
+            Simplify extension auto-fills the form when the page opens — just click Submit
+          </div>
+        )}
       </div>
     </div>
   );
@@ -764,14 +778,45 @@ export default function App() {
             <Btn onClick={testEmail}>Test Email</Btn>
           </div>
 
-          <div style={{ marginTop: 20, padding: 14, background: "#0f172a", borderRadius: 8,
+          {/* Simplify setup card */}
+          <div style={{ marginTop: 20, background: "#1a0a2e", border: "1px solid #581c87",
+            borderRadius: 10, padding: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <span style={{ fontSize: 20 }}>✨</span>
+              <div>
+                <div style={{ fontWeight: 700, color: "#c084fc", fontSize: 14 }}>Simplify Auto-Fill</div>
+                <div style={{ color: "#7e22ce", fontSize: 12 }}>Fills Workday, Greenhouse, Lever, Ashby forms automatically</div>
+              </div>
+              <a href="https://simplify.jobs/chrome" target="_blank" rel="noreferrer"
+                style={{ marginLeft: "auto", padding: "7px 14px", background: "#7c3aed",
+                  color: "#fff", borderRadius: 7, fontSize: 12, fontWeight: 700,
+                  textDecoration: "none", whiteSpace: "nowrap" }}>
+                Install Free ↗
+              </a>
+            </div>
+            <div style={{ fontSize: 12, color: "#6b21a8", lineHeight: 1.8 }}>
+              <strong style={{ color: "#a855f7" }}>How it works:</strong><br />
+              1. Install Simplify Chrome extension (free) and log in<br />
+              2. Fill your profile once in Simplify<br />
+              3. Our bot opens each job in Chrome → Simplify fills every field instantly<br />
+              4. You just click <strong>Submit</strong> (or set <code>SIMPLIFY_AUTO_SUBMIT=true</code> to auto-submit)<br /><br />
+              <strong style={{ color: "#a855f7" }}>Current mode:</strong>{" "}
+              <code style={{ color: "#c084fc" }}>{settings?.simplifyMode || "shell"}</code>
+              {settings?.simplifyMode === "shell"
+                ? " — opens jobs in your running Chrome (recommended)"
+                : " — Playwright controls Chrome (can auto-submit)"}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 14, padding: 14, background: "#0f172a", borderRadius: 8,
             fontSize: 12, color: "#64748b", lineHeight: 1.9 }}>
             <strong style={{ color: "#475569" }}>Credentials</strong> (set in <code>.env</code>, never sent to browser)<br />
             <code>APIFY_TOKEN</code> — {settings?.apifyConfigured ? "✓ configured" : "not set"}<br />
             <code>SERPAPI_KEY</code> — {settings?.serpApiConfigured ? "✓ configured" : "not set"}<br />
             <code>LINKEDIN_EMAIL / PASSWORD</code> — {settings?.linkedinConfigured ? "✓ configured" : "⚠ not set — needed for auto-apply"}<br />
             <code>EMAIL_USER / EMAIL_PASS</code> — {settings?.emailConfigured ? "✓ configured" : "not set"}<br />
-            <code>RESUME_PATH</code> — {settings?.profile?.resumePath ? "✓ " + settings.profile.resumePath : "not set"}
+            <code>RESUME_PATH</code> — {settings?.profile?.resumePath ? "✓ " + settings.profile.resumePath : "not set"}<br />
+            <code>SIMPLIFY_MODE</code> — {settings?.simplifyMode || "shell"} | <code>SIMPLIFY_AUTO_SUBMIT</code> — {settings?.simplifyAutoSubmit ? "true" : "false"}
           </div>
         </div>
       )}

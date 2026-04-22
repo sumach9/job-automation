@@ -67,6 +67,9 @@ const settings = {
   // LinkedIn credentials for Easy Apply
   linkedinEmail: process.env.LINKEDIN_EMAIL || "",
   linkedinPassword: process.env.LINKEDIN_PASSWORD || "",
+  // Simplify integration
+  simplifyMode: process.env.SIMPLIFY_MODE || "shell",
+  simplifyAutoSubmit: process.env.SIMPLIFY_AUTO_SUBMIT === "true",
   // Applicant profile
   profile: {
     phone: process.env.APPLICANT_PHONE || "",
@@ -437,8 +440,11 @@ async function applyToJob(job) {
       if (autoApplyResult.success) {
         status = "auto-applied";
         log("success", `Auto-applied: ${job.title} @ ${job.company}`, autoApplyResult.reason);
+      } else if (autoApplyResult.simplifyUsed && autoApplyResult.browserOpened) {
+        status = "simplify-opened"; // opened in Chrome with Simplify filling the form
+        log("info", `Simplify opened: ${job.title} @ ${job.company} — form pre-filled`);
       } else if (autoApplyResult.browserOpened) {
-        status = "browser-opened"; // opened for user, one-click apply
+        status = "browser-opened";
         log("info", `Opened browser: ${job.title} @ ${job.company}`);
       } else {
         status = "apply-failed";
@@ -689,7 +695,10 @@ app.post("/api/apply/:id", async (req, res) => {
     profile: settings.profile,
     resumePath: settings.profile.resumePath,
   }).then((result) => {
-    record.status = result.success ? "auto-applied" : "apply-failed";
+    record.status = result.success ? "auto-applied"
+      : (result.simplifyUsed && result.browserOpened) ? "simplify-opened"
+      : result.browserOpened ? "browser-opened"
+      : "apply-failed";
     record.autoApplyNote = result.reason;
     if (result.jobDetails?.description) record.description = result.jobDetails.description;
     if (result.jobDetails?.skills?.length) record.skills = result.jobDetails.skills;
