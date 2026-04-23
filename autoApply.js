@@ -87,8 +87,16 @@ async function ensureLinkedInLogin(credentials) {
 }
 
 export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }) {
-  const context = await ensureLinkedInLogin(credentials);
-  const page = await context.newPage();
+  let context, page;
+  try {
+    context = await ensureLinkedInLogin(credentials);
+    page = await context.newPage();
+  } catch (err) {
+    // Playwright failed to launch — fall back to opening in Chrome
+    _browser = null; _linkedinContext = null;
+    try { await execAsync(`start "" "${jobUrl}"`); } catch {}
+    return { success: false, reason: `Playwright error, opened in Chrome: ${err.message}`, browserOpened: true, autoApplied: false };
+  }
   const result = { success: false, reason: "", autoApplied: false };
 
   try {
@@ -132,7 +140,7 @@ export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }
   } catch (err) {
     return { ...result, reason: err.message, jobDetails: {} };
   } finally {
-    await page.close();
+    await page.close().catch(() => {});
   }
 }
 
@@ -216,8 +224,16 @@ async function ensureIndeedLogin(credentials) {
 }
 
 export async function applyIndeed({ jobUrl, credentials, profile, resumePath }) {
-  const context = await ensureIndeedLogin(credentials);
-  const page = await context.newPage();
+  let context, page;
+  try {
+    context = await ensureIndeedLogin(credentials);
+    page = await context.newPage();
+  } catch (err) {
+    // Playwright failed to launch — fall back to opening in Chrome
+    _browser = null; _indeedContext = null;
+    try { await execAsync(`start "" "${jobUrl}"`); } catch {}
+    return { success: false, reason: `Playwright error, opened in Chrome: ${err.message}`, browserOpened: true, autoApplied: false };
+  }
   const result = { success: false, reason: "", autoApplied: false };
 
   try {
@@ -280,7 +296,7 @@ export async function applyIndeed({ jobUrl, credentials, profile, resumePath }) 
   } catch (err) {
     return { ...result, reason: err.message };
   } finally {
-    await page.close();
+    await page.close().catch(() => {});
   }
 }
 

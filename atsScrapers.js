@@ -44,59 +44,55 @@ function normalizeLocation(loc = "") {
 
 // ── Company lists by ATS provider ─────────────────────────────────────────────
 
+// All slugs below are verified working (404s removed, moved to correct ATS provider)
 export const GREENHOUSE_COMPANIES = [
-  { slug: "openai",         name: "OpenAI" },
+  // Core AI/ML
   { slug: "anthropic",      name: "Anthropic" },
   { slug: "databricks",     name: "Databricks" },
-  { slug: "expediagroup",   name: "Expedia Group" },
-  { slug: "rover",          name: "Rover" },
-  { slug: "remitly",        name: "Remitly" },
-  { slug: "redfin",         name: "Redfin" },
-  { slug: "smartsheet",     name: "Smartsheet" },
-  { slug: "outreach",       name: "Outreach" },
-  { slug: "lyft",           name: "Lyft" },
-  { slug: "doordash",       name: "DoorDash" },
-  { slug: "airbnb",         name: "Airbnb" },
+  // Data/Cloud platforms
+  { slug: "datadog",        name: "Datadog" },
+  { slug: "elastic",        name: "Elastic" },
+  { slug: "mongodb",        name: "MongoDB" },
+  { slug: "cloudflare",     name: "Cloudflare" },
+  { slug: "twilio",         name: "Twilio" },
+  { slug: "okta",           name: "Okta" },
+  { slug: "dropbox",        name: "Dropbox" },
+  { slug: "block",          name: "Block (Square)" },
   { slug: "stripe",         name: "Stripe" },
+  // Social/Consumer
+  { slug: "airbnb",         name: "Airbnb" },
   { slug: "reddit",         name: "Reddit" },
-  { slug: "qualtrics",      name: "Qualtrics" },
-  { slug: "snap",           name: "Snap" },
-  { slug: "duolingo",       name: "Duolingo" },
-  { slug: "tableau",        name: "Tableau (Salesforce)" },
-  { slug: "zillow",         name: "Zillow" },
-  { slug: "f5",             name: "F5 Networks" },
-  { slug: "convoy",         name: "Convoy" },
-  { slug: "hulu",           name: "Hulu" },
-  { slug: "twitch",         name: "Twitch" },
-  { slug: "yelp",           name: "Yelp" },
   { slug: "pinterest",      name: "Pinterest" },
+  { slug: "duolingo",       name: "Duolingo" },
+  { slug: "twitch",         name: "Twitch" },
+  // Seattle/PNW
+  { slug: "smartsheet",     name: "Smartsheet" },
+  { slug: "lyft",           name: "Lyft" },
+  { slug: "qualtrics",      name: "Qualtrics" },
   { slug: "figma",          name: "Figma" },
+  // Enterprise
+  { slug: "asana",          name: "Asana" },
+  { slug: "coinbase",       name: "Coinbase" },
+  { slug: "instacart",      name: "Instacart" },
+  { slug: "tripadvisor",    name: "TripAdvisor" },
 ];
 
 export const LEVER_COMPANIES = [
   { slug: "palantir",       name: "Palantir" },
-  { slug: "notionhq",       name: "Notion" },
-  { slug: "coinbase",       name: "Coinbase" },
-  { slug: "datadog",        name: "Datadog" },
-  { slug: "hashicorp",      name: "HashiCorp" },
-  { slug: "mongodb",        name: "MongoDB" },
-  { slug: "twilio",         name: "Twilio" },
-  { slug: "cloudflare",     name: "Cloudflare" },
-  { slug: "asana",          name: "Asana" },
-  { slug: "elastic",        name: "Elastic" },
-  { slug: "grafana-labs",   name: "Grafana Labs" },
+  { slug: "rover",          name: "Rover" },
+  { slug: "plaid",          name: "Plaid" },
 ];
 
 export const ASHBY_COMPANIES = [
-  { slug: "scale-ai",       name: "Scale AI" },
+  // OpenAI ecosystem
+  { slug: "openai",         name: "OpenAI" },
+  { slug: "perplexity",     name: "Perplexity AI" },
   { slug: "cohere",         name: "Cohere" },
-  { slug: "huggingface",    name: "Hugging Face" },
-  { slug: "perplexity-ai",  name: "Perplexity AI" },
-  { slug: "together-ai",    name: "Together AI" },
   { slug: "mistral",        name: "Mistral AI" },
-  { slug: "imbue",          name: "Imbue" },
-  { slug: "adept",          name: "Adept AI" },
-  { slug: "arcee-ai",       name: "Arcee AI" },
+  // Infra/Cloud AI
+  { slug: "confluent",      name: "Confluent" },
+  { slug: "anyscale",       name: "Anyscale" },
+  { slug: "modal",          name: "Modal" },
 ];
 
 // ── Greenhouse scraper ────────────────────────────────────────────────────────
