@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Welcome to OneTouch Apply</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+
+  .card {
+    max-width: 640px;
+    width: 100%;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .hero {
+    background: linear-gradient(135deg, #1a1040 0%, #0d1117 100%);
+    padding: 48px 40px 40px;
+    text-align: center;
+    border-bottom: 1px solid #30363d;
+  }
+  .logo {
+    width: 72px; height: 72px;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    border-radius: 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 38px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 32px rgba(99,102,241,0.4);
+  }
+  h1 { font-size: 32px; font-weight: 900; color: #e6edf3; margin-bottom: 10px; letter-spacing: -0.5px; }
+  .tagline { font-size: 16px; color: #8b949e; line-height: 1.6; }
+  .tagline strong { color: #818cf8; }
+
+  .steps { padding: 32px 40px; }
+  .steps h2 { font-size: 13px; font-weight: 700; color: #8b949e; text-transform: uppercase;
+    letter-spacing: 0.1em; margin-bottom: 20px; }
+
+  .step {
+    display: flex; gap: 16px; align-items: flex-start;
+    padding: 16px 0;
+    border-bottom: 1px solid #21262d;
+  }
+  .step:last-child { border-bottom: none; }
+  .step-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800; color: white;
+    flex-shrink: 0; margin-top: 2px;
+  }
+  .step-body h3 { font-size: 14px; font-weight: 700; color: #e6edf3; margin-bottom: 4px; }
+  .step-body p  { font-size: 13px; color: #8b949e; line-height: 1.6; }
+  .step-body code {
+    background: #21262d; border: 1px solid #30363d; border-radius: 5px;
+    padding: 1px 7px; font-size: 12px; color: #818cf8; font-family: monospace;
+  }
+
+  .footer {
+    padding: 24px 40px;
+    background: #0d1117;
+    border-top: 1px solid #30363d;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .btn {
+    padding: 11px 24px; border-radius: 10px; border: none;
+    font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: all .15s;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    color: white;
+    box-shadow: 0 4px 16px rgba(99,102,241,0.35);
+  }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-secondary {
+    background: #21262d; color: #8b949e;
+    border: 1px solid #30363d;
+  }
+  .btn-secondary:hover { border-color: #6366f1; color: #818cf8; }
+
+  .sites {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+  }
+  .site-chip {
+    background: #21262d; border: 1px solid #30363d;
+    border-radius: 20px; padding: 4px 12px;
+    font-size: 11px; color: #8b949e; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="logo">⚡</div>
+    <h1>Welcome to OneTouch</h1>
+    <p class="tagline">
+      Apply to any job in <strong>one click</strong>.<br/>
+      Auto-fills every field — name, email, resume, dropdowns, everything.
+    </p>
+  </div>
+
+  <!-- Steps -->
+  <div class="steps">
+    <h2>Get started in 3 steps</h2>
+
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>Fill in your profile</h3>
+        <p>Click the <strong>⚡ OneTouch</strong> icon in your Chrome toolbar → go to the <strong>👤 Profile</strong> tab → enter your name, email, phone, LinkedIn, and upload your resume.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>Browse to any job page</h3>
+        <p>OneTouch works on all major platforms automatically:</p>
+        <div class="sites">
+          <span class="site-chip">LinkedIn</span>
+          <span class="site-chip">Indeed</span>
+          <span class="site-chip">Greenhouse</span>
+          <span class="site-chip">Lever</span>
+          <span class="site-chip">Ashby</span>
+          <span class="site-chip">Workday</span>
+          <span class="site-chip">Glassdoor</span>
+          <span class="site-chip">ZipRecruiter</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Click ⚡ and hit Submit</h3>
+        <p>The floating button fills every field instantly. Review, then click the highlighted <strong>Submit</strong> button. Done — tracked in your dashboard automatically.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <button class="btn btn-primary" onclick="window.close()">⚡ Let's go!</button>
+    <a class="btn btn-secondary" href="http://localhost:3004" target="_blank">📊 Open Dashboard</a>
+  </div>
+
+</div>
+</body>
+</html>
