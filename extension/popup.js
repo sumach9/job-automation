@@ -1,0 +1,169 @@
+/**
+ * OneTouch Apply — Popup Script
+ */
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    const id = tab.dataset.tab;
+    document.getElementById("tab-profile").style.display = id === "profile" ? "" : "none";
+    document.getElementById("tab-actions").style.display = id === "actions" ? "" : "none";
+    if (id === "actions") detectCurrentJob();
+  });
+});
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type = "info", duration = 2500) {
+  const t = document.getElementById("popup-toast");
+  t.textContent = msg;
+  t.className = `show ${type}`;
+  setTimeout(() => t.className = "", duration);
+}
+
+// ── Load stats from background ────────────────────────────────────────────────
+chrome.runtime.sendMessage({ type: "GET_STATS" }, (resp) => {
+  if (resp?.ok) {
+    document.getElementById("s-found").textContent   = resp.stats?.found ?? "—";
+    document.getElementById("s-applied").textContent = resp.stats?.applied ?? "—";
+    document.getElementById("status-dot").classList.toggle("running", resp.stats?.isRunning);
+  }
+  // Today count from badge
+  chrome.action.getBadgeText({}, (text) => {
+    document.getElementById("s-today").textContent = text || "0";
+  });
+});
+
+// ── Load profile ──────────────────────────────────────────────────────────────
+chrome.storage.sync.get("profile", ({ profile }) => {
+  if (!profile) return;
+  const set = (id, val) => { if (val) document.getElementById(id).value = val; };
+  set("f-name",     profile.name);
+  set("f-email",    profile.email);
+  set("f-phone",    profile.phone);
+  set("f-location", profile.location);
+  set("f-linkedin", profile.linkedinUrl);
+  set("f-github",   profile.github);
+  set("f-salary",   profile.expectedSalary);
+  set("f-exp",      profile.yearsExperience);
+
+  if (profile.resumeFileName) {
+    document.getElementById("resume-name").textContent = `✓ ${profile.resumeFileName}`;
+    document.getElementById("resume-name").style.display = "";
+    document.getElementById("resume-zone").classList.add("has-file");
+  }
+});
+
+// ── Save profile ──────────────────────────────────────────────────────────────
+document.getElementById("save-btn").addEventListener("click", async () => {
+  const profile = {
+    name:           document.getElementById("f-name").value.trim(),
+    firstName:      document.getElementById("f-name").value.trim().split(" ")[0],
+    lastName:       document.getElementById("f-name").value.trim().split(" ").slice(-1)[0],
+    email:          document.getElementById("f-email").value.trim(),
+    phone:          document.getElementById("f-phone").value.trim(),
+    location:       document.getElementById("f-location").value.trim(),
+    linkedinUrl:    document.getElementById("f-linkedin").value.trim(),
+    github:         document.getElementById("f-github").value.trim(),
+    expectedSalary: document.getElementById("f-salary").value.trim(),
+    yearsExperience:document.getElementById("f-exp").value.trim(),
+    zipCode:        "98101",
+    savedAt:        new Date().toISOString(),
+  };
+
+  // Preserve resume data if already saved
+  chrome.storage.sync.get("profile", (d) => {
+    if (d.profile?.resumeData)  profile.resumeData     = d.profile.resumeData;
+    if (d.profile?.resumeFileName) profile.resumeFileName = d.profile.resumeFileName;
+    chrome.runtime.sendMessage({ type: "SAVE_PROFILE", profile }, () => {
+      showToast("✅ Profile saved!", "success");
+    });
+  });
+});
+
+// ── Resume upload ─────────────────────────────────────────────────────────────
+document.getElementById("resume-zone").addEventListener("click", () => {
+  document.getElementById("resume-input").click();
+});
+
+document.getElementById("resume-zone").addEventListener("dragover", (e) => {
+  e.preventDefault();
+  document.getElementById("resume-zone").style.borderColor = "#6366f1";
+});
+
+document.getElementById("resume-zone").addEventListener("drop", (e) => {
+  e.preventDefault();
+  handleResumeFile(e.dataTransfer.files[0]);
+});
+
+document.getElementById("resume-input").addEventListener("change", (e) => {
+  handleResumeFile(e.target.files[0]);
+});
+
+function handleResumeFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const resumeData = ev.target.result;
+    chrome.storage.sync.get("profile", ({ profile }) => {
+      const updated = { ...(profile || {}), resumeData, resumeFileName: file.name };
+      chrome.storage.sync.set({ profile: updated }, () => {
+        document.getElementById("resume-name").textContent = `✓ ${file.name}`;
+        document.getElementById("resume-name").style.display = "";
+        document.getElementById("resume-zone").classList.add("has-file");
+        showToast("📄 Resume saved!", "success");
+      });
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Detect current job ────────────────────────────────────────────────────────
+function detectCurrentJob() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs[0];
+    if (!tab) return;
+    const url = tab.url || "";
+    const title = tab.title || "";
+
+    const isJobSite = [
+      "linkedin.com/jobs", "indeed.com", "greenhouse.io", "lever.co",
+      "ashbyhq.com", "myworkdayjobs.com", "glassdoor.com", "ziprecruiter.com",
+    ].some((s) => url.includes(s));
+
+    if (isJobSite) {
+      document.getElementById("cj-title").textContent = title.split(" | ")[0] || title;
+      document.getElementById("cj-meta").textContent = new URL(url).hostname;
+      document.getElementById("fill-btn").disabled = false;
+    } else {
+      document.getElementById("cj-title").textContent = "No job page detected";
+      document.getElementById("cj-meta").textContent = "Navigate to a supported job site";
+      document.getElementById("fill-btn").disabled = true;
+    }
+  });
+}
+
+// ── Fill form on active tab ───────────────────────────────────────────────────
+document.getElementById("fill-btn").addEventListener("click", () => {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      func: () => document.getElementById("onetouch-btn")?.click(),
+    });
+    showToast("⚡ Filling form…", "info");
+    window.close();
+  });
+});
+
+// ── Scan & Dashboard ──────────────────────────────────────────────────────────
+document.getElementById("scan-btn").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "TRIGGER_SCAN" }, (resp) => {
+    showToast(resp?.ok ? "🔍 Scan started!" : "⚠ Couldn't reach server", resp?.ok ? "success" : "error");
+  });
+});
+
+document.getElementById("dashboard-btn").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "OPEN_DASHBOARD" });
+  window.close();
+});

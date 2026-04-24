@@ -777,6 +777,67 @@ app.get("/api/scan-history", (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// OneTouch Extension Endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+// POST /api/onetouch-apply — Chrome extension calls this when user clicks ⚡
+// Saves the job as "onetouch-filled" and tracks it in the dashboard
+app.post("/api/onetouch-apply", (req, res) => {
+  try {
+    const job = req.body;
+    if (!job?.url) return res.json({ ok: false, reason: "No URL provided" });
+
+    // Dedup
+    if (seenUrls.has(job.url)) return res.json({ ok: true, deduped: true });
+    seenUrls.add(job.url);
+
+    // Score it
+    const scored = scoreJob(job);
+    const record = {
+      id:             Date.now() + Math.random(),
+      title:          job.title || "Unknown",
+      company:        job.company || "",
+      location:       job.location || "",
+      url:            job.url,
+      applyUrl:       job.url,
+      platform:       job.platform || job.site || "OneTouch",
+      atsProvider:    job.atsProvider || "",
+      status:         "onetouch-filled",
+      score:          scored.score,
+      scoreLabel:     scoreLabel(scored.score),
+      scoreBreakdown: scored.breakdown,
+      filledFields:   job.filledFields || 0,
+      savedAt:        new Date().toISOString(),
+      postedAt:       job.postedAt || new Date().toISOString(),
+      easyApply:      false,
+      skills:         job.skills || [],
+      description:    job.description || "",
+      salary:         job.salary || "",
+    };
+
+    applications.push(record);
+    logScanHistory(record, "onetouch-filled");
+    saveData({ applications, logs });
+    log("success", `OneTouch: ${record.title} @ ${record.company}`, `Score ${record.score}`);
+
+    res.json({ ok: true, id: record.id, score: record.score });
+  } catch (err) {
+    res.status(500).json({ ok: false, reason: err.message });
+  }
+});
+
+// POST /api/score-job — extension calls this to show match score on job page
+app.post("/api/score-job", (req, res) => {
+  try {
+    const job = req.body;
+    const result = scoreJob(job);
+    res.json({ score: result.score, label: scoreLabel(result.score), breakdown: result.breakdown });
+  } catch {
+    res.status(500).json({ score: null });
+  }
+});
+
 // GET /api/viral-image — generate & stream a 1200×630 PNG from live job data
 // No external API calls — pure SVG+Sharp pipeline
 app.get("/api/viral-image", async (req, res) => {

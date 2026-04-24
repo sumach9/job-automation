@@ -18,6 +18,7 @@ const STATUS_META = {
   "auto-applied":       { bg: "#14532d", color: "#4ade80",  label: "✓ Auto Applied" },
   "easy-apply-pending": { bg: "#1e3a5f", color: "#60a5fa",  label: "⚡ Easy Apply" },
   "simplify-opened":    { bg: "#2e1065", color: "#c084fc",  label: "✨ Simplify" },
+  "onetouch-filled":    { bg: "#1e1040", color: "#818cf8",  label: "⚡ OneTouch" },
   "browser-opened":     { bg: "#431407", color: "#fb923c",  label: "🌐 Opened" },
   "queued-manual":      { bg: "#1c1917", color: "#a8a29e",  label: "📋 Queued" },
   "apply-failed":       { bg: "#450a0a", color: "#f87171",  label: "✕ Failed" },
@@ -581,10 +582,10 @@ export default function App() {
                 background: "linear-gradient(135deg, #6366f1, #a855f7)",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 fontSize: 18, flexShrink: 0,
-              }}>🤖</div>
+              }}>⚡</div>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: -.3 }}>JobBot</div>
-                <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 1 }}>Automation Suite</div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: -.3 }}>OneTouch</div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 1 }}>Apply in one click</div>
               </div>
             </div>
           </div>

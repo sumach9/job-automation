@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>OneTouch Apply</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 320px;
+    min-height: 420px;
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+  }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #1a1040, #0d1117);
+    border-bottom: 1px solid #21262d;
+    padding: 16px 18px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .logo {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .brand-name { font-size: 16px; font-weight: 800; color: #e6edf3; }
+  .brand-sub  { font-size: 10px; color: #8b949e; margin-top: 1px; letter-spacing: 0.05em; }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #30363d; margin-left: auto; flex-shrink: 0;
+    transition: background .3s;
+  }
+  .status-dot.running { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+
+  /* Stats row */
+  .stats {
+    display: flex;
+    border-bottom: 1px solid #21262d;
+  }
+  .stat {
+    flex: 1;
+    padding: 12px 8px;
+    text-align: center;
+    border-right: 1px solid #21262d;
+  }
+  .stat:last-child { border-right: none; }
+  .stat-val  { font-size: 22px; font-weight: 800; color: #e6edf3; line-height: 1; }
+  .stat-val.indigo { color: #818cf8; }
+  .stat-val.green  { color: #3fb950; }
+  .stat-val.purple { color: #c084fc; }
+  .stat-lbl  { font-size: 9px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+
+  /* Section */
+  .section { padding: 14px 18px; border-bottom: 1px solid #21262d; }
+  .section-title {
+    font-size: 10px; font-weight: 700; color: #8b949e;
+    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px;
+  }
+
+  /* Profile fields */
+  .field { margin-bottom: 8px; }
+  .field label { display: block; font-size: 10px; color: #8b949e; margin-bottom: 3px; font-weight: 600; }
+  .field input, .field textarea {
+    width: 100%; background: #161b22; border: 1px solid #30363d;
+    border-radius: 6px; padding: 6px 10px; color: #e6edf3; font-size: 12px;
+    outline: none; resize: none; transition: border-color .15s;
+  }
+  .field input:focus, .field textarea:focus { border-color: #6366f1; }
+
+  /* Resume area */
+  .resume-zone {
+    border: 2px dashed #30363d; border-radius: 8px; padding: 14px;
+    text-align: center; cursor: pointer; transition: all .2s;
+  }
+  .resume-zone:hover { border-color: #6366f1; background: rgba(99,102,241,.05); }
+  .resume-zone.has-file { border-color: #3fb950; background: rgba(63,185,80,.05); }
+  .resume-zone .rz-icon { font-size: 22px; margin-bottom: 4px; }
+  .resume-zone .rz-label { font-size: 11px; color: #8b949e; }
+  .resume-zone .rz-name  { font-size: 11px; color: #3fb950; font-weight: 600; margin-top: 4px; }
+  #resume-input { display: none; }
+
+  /* Buttons */
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+  .btn {
+    flex: 1; padding: 8px 12px; border-radius: 8px; border: none;
+    font-size: 12px; font-weight: 700; cursor: pointer; transition: all .15s;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    color: #fff;
+  }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-secondary {
+    background: #161b22; color: #8b949e;
+    border: 1px solid #30363d;
+  }
+  .btn-secondary:hover { border-color: #6366f1; color: #818cf8; }
+  .btn-green {
+    background: #0d2818; color: #3fb950;
+    border: 1px solid #1a4a28;
+  }
+  .btn-green:hover { background: #163820; }
+
+  /* Tab bar */
+  .tabs {
+    display: flex;
+    background: #161b22;
+    border-bottom: 1px solid #21262d;
+  }
+  .tab {
+    flex: 1; padding: 10px 6px; text-align: center;
+    font-size: 11px; font-weight: 600; color: #8b949e;
+    cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all .15s;
+  }
+  .tab.active { color: #818cf8; border-bottom-color: #6366f1; }
+  .tab:hover:not(.active) { color: #e6edf3; }
+
+  /* Toast */
+  #popup-toast {
+    position: fixed; bottom: 10px; left: 10px; right: 10px;
+    background: #1c2128; border: 1px solid #30363d; border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; text-align: center;
+    animation: fadeIn .2s ease; display: none;
+  }
+  #popup-toast.show { display: block; }
+  #popup-toast.success { border-color: #3fb950; color: #3fb950; }
+  #popup-toast.error   { border-color: #f85149; color: #f85149; }
+
+  @keyframes fadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; } }
+
+  .current-job-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .current-job-title { font-size: 12px; font-weight: 700; color: #e6edf3; margin-bottom: 2px; }
+  .current-job-meta  { font-size: 10px; color: #8b949e; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">⚡</div>
+  <div>
+    <div class="brand-name">OneTouch</div>
+    <div class="brand-sub">APPLY IN ONE CLICK</div>
+  </div>
+  <div class="status-dot" id="status-dot" title="Bot scanner status"></div>
+</div>
+
+<!-- Stats -->
+<div class="stats">
+  <div class="stat">
+    <div class="stat-val indigo" id="s-found">—</div>
+    <div class="stat-lbl">Found</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val green" id="s-applied">—</div>
+    <div class="stat-lbl">Applied</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val purple" id="s-today">—</div>
+    <div class="stat-lbl">Today</div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active" data-tab="profile">👤 Profile</div>
+  <div class="tab" data-tab="actions">⚡ Actions</div>
+</div>
+
+<!-- Profile Tab -->
+<div id="tab-profile">
+  <div class="section">
+    <div class="section-title">Your Info</div>
+    <div class="field"><label>Full Name</label><input id="f-name" type="text" placeholder="Suma Chidara"/></div>
+    <div class="field"><label>Email</label><input id="f-email" type="email" placeholder="you@email.com"/></div>
+    <div class="field"><label>Phone</label><input id="f-phone" type="tel" placeholder="+1 (555) 000-0000"/></div>
+    <div class="field"><label>Location</label><input id="f-location" type="text" placeholder="Seattle, WA"/></div>
+    <div class="field"><label>LinkedIn URL</label><input id="f-linkedin" type="url" placeholder="linkedin.com/in/…"/></div>
+    <div class="field"><label>GitHub URL</label><input id="f-github" type="url" placeholder="github.com/…"/></div>
+    <div class="field"><label>Expected Salary</label><input id="f-salary" type="text" placeholder="$150,000"/></div>
+    <div class="field"><label>Years of Experience</label><input id="f-exp" type="text" placeholder="3"/></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Resume</div>
+    <div class="resume-zone" id="resume-zone">
+      <div class="rz-icon">📄</div>
+      <div class="rz-label">Drop PDF here or click to upload</div>
+      <div class="rz-name" id="resume-name" style="display:none"></div>
+    </div>
+    <input type="file" id="resume-input" accept=".pdf,.doc,.docx"/>
+  </div>
+
+  <div class="section" style="border-bottom:none">
+    <div class="btn-row">
+      <button class="btn btn-primary" id="save-btn">💾 Save Profile</button>
+    </div>
+  </div>
+</div>
+
+<!-- Actions Tab -->
+<div id="tab-actions" style="display:none">
+  <div class="section">
+    <div class="section-title">Current Page</div>
+    <div class="current-job-card" id="current-job">
+      <div class="current-job-title" id="cj-title">No job detected</div>
+      <div class="current-job-meta" id="cj-meta">Navigate to a job listing</div>
+    </div>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn btn-primary" id="fill-btn">⚡ Fill This Form</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Bot Scanner</div>
+    <div class="btn-row">
+      <button class="btn btn-green" id="scan-btn">▶ Run Scan Now</button>
+      <button class="btn btn-secondary" id="dashboard-btn">📊 Dashboard</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="popup-toast"></div>
+
+<script src="popup.js"></script>
+</body>
+</html>
