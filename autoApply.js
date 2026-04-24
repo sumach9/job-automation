@@ -300,17 +300,34 @@ export async function applyIndeed({ jobUrl, credentials, profile, resumePath }) 
   }
 }
 
+// ─── Detect if running on a cloud server (Railway, Render, etc.) ─────────────
+const IS_SERVER = !!(
+  process.env.RAILWAY_ENVIRONMENT ||
+  process.env.RENDER ||
+  process.env.FLY_APP_NAME ||
+  process.env.DYNO ||                // Heroku
+  (process.env.PORT && !process.env.LOCALAPPDATA)  // generic server heuristic
+);
+
 // ─── Simplify integration ─────────────────────────────────────────────────────
 // Opens job in Chrome with Simplify extension active.
 // Simplify auto-fills every form field (Workday, Greenhouse, Lever, Ashby, etc.)
 // Two modes controlled by SIMPLIFY_MODE env var:
 //   "playwright" — Playwright controls Chrome, can optionally auto-submit
 //   "shell"      — Opens in existing Chrome window (default, most reliable)
+//   "off"        — Disabled (queued for manual review)
 async function openWithSimplify(url, job) {
   if (!url) return { success: false, reason: "No URL available" };
 
-  const mode = process.env.SIMPLIFY_MODE || "shell";
+  // On cloud servers, shell mode makes no sense — auto-upgrade to playwright
+  let mode = process.env.SIMPLIFY_MODE || "shell";
+  if (IS_SERVER && mode === "shell") mode = "playwright";
   const autoSubmit = process.env.SIMPLIFY_AUTO_SUBMIT === "true";
+
+  // ── Off mode: just queue for manual review ────────────────────────────────
+  if (mode === "off") {
+    return { success: false, reason: "Simplify disabled — queued for manual apply", autoApplied: false };
+  }
 
   // ── Shell mode: open in running Chrome where Simplify is already active ──────
   if (mode === "shell") {
