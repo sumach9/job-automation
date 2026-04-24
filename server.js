@@ -10,6 +10,7 @@ import dotenv from "dotenv";
 import { smartApply, detectPlatform, resetSession } from "./autoApply.js";
 import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES, ATS_COMPANY_COUNT } from "./atsScrapers.js";
 import { scoreJob, scoreLabel, scoreColor } from "./scorer.js";
+import { generateViralImage } from "./imageGen.js";
 
 dotenv.config();
 
@@ -773,6 +774,21 @@ app.get("/api/scan-history", (req, res) => {
     res.json({ total: raw.length - 1, items: rows });
   } catch {
     res.json({ total: 0, items: [] });
+  }
+});
+
+// GET /api/viral-image — generate & stream a 1200×630 PNG from live job data
+// No external API calls — pure SVG+Sharp pipeline
+app.get("/api/viral-image", async (req, res) => {
+  try {
+    const { png, stats } = await generateViralImage();
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Content-Disposition", "inline; filename=\"job-bot-viral.png\"");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Stats", JSON.stringify(stats));
+    res.send(png);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

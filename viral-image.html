@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=1200"/>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+
+  body {
+    width: 1200px;
+    height: 630px;
+    overflow: hidden;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: #0a0a0f;
+  }
+
+  .card {
+    width: 1200px;
+    height: 630px;
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, #0d0d1a 0%, #0a0f1e 50%, #0d0d1a 100%);
+  }
+
+  /* Glowing grid background */
+  .grid-bg {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(99,102,241,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99,102,241,0.06) 1px, transparent 1px);
+    background-size: 50px 50px;
+  }
+
+  /* Radial glow blobs */
+  .blob1 {
+    position: absolute;
+    width: 600px; height: 600px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%);
+    top: -150px; left: -100px;
+    pointer-events: none;
+  }
+  .blob2 {
+    position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(168,85,247,0.14) 0%, transparent 70%);
+    bottom: -150px; right: -50px;
+    pointer-events: none;
+  }
+  .blob3 {
+    position: absolute;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(6,182,212,0.10) 0%, transparent 70%);
+    top: 200px; right: 300px;
+    pointer-events: none;
+  }
+
+  /* Main layout */
+  .content {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+    padding: 52px 64px 48px;
+  }
+
+  /* Top badge */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.4);
+    border-radius: 100px;
+    padding: 6px 16px;
+    width: fit-content;
+    margin-bottom: 20px;
+  }
+  .badge-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 8px #22c55e;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; } 50% { opacity:0.4; }
+  }
+  .badge-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #a5b4fc;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* Headline */
+  .headline {
+    font-size: 68px;
+    font-weight: 900;
+    line-height: 1.0;
+    letter-spacing: -2px;
+    color: #fff;
+    max-width: 700px;
+    margin-bottom: 20px;
+  }
+  .headline .highlight {
+    background: linear-gradient(90deg, #6366f1, #a855f7, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Sub */
+  .sub {
+    font-size: 18px;
+    color: rgba(255,255,255,0.55);
+    font-weight: 400;
+    max-width: 620px;
+    line-height: 1.5;
+    letter-spacing: 0.01em;
+  }
+
+  /* Stats row */
+  .stats {
+    display: flex;
+    gap: 16px;
+    margin-top: 36px;
+  }
+  .stat-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 18px 24px;
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+  }
+  .stat-card.indigo::before { background: linear-gradient(90deg,#6366f1,#818cf8); }
+  .stat-card.purple::before { background: linear-gradient(90deg,#a855f7,#c084fc); }
+  .stat-card.cyan::before   { background: linear-gradient(90deg,#06b6d4,#67e8f9); }
+  .stat-card.green::before  { background: linear-gradient(90deg,#22c55e,#86efac); }
+
+  .stat-icon { font-size: 22px; margin-bottom: 6px; }
+  .stat-number {
+    font-size: 38px;
+    font-weight: 900;
+    color: #fff;
+    letter-spacing: -1px;
+    line-height: 1;
+  }
+  .stat-card.indigo .stat-number { color: #818cf8; }
+  .stat-card.purple .stat-number { color: #c084fc; }
+  .stat-card.cyan   .stat-number { color: #67e8f9; }
+  .stat-card.green  .stat-number { color: #86efac; }
+  .stat-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.45);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
+  }
+
+  /* Right panel — terminal */
+  .terminal {
+    position: absolute;
+    right: 56px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 380px;
+    background: rgba(10,10,20,0.85);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    overflow: hidden;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 0 60px rgba(99,102,241,0.15), 0 30px 60px rgba(0,0,0,0.5);
+  }
+  .terminal-header {
+    background: rgba(255,255,255,0.05);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .dot { width:12px;height:12px;border-radius:50%; }
+  .dot.red   { background:#ff5f57; }
+  .dot.yellow{ background:#febc2e; }
+  .dot.green { background:#28c840; }
+  .terminal-title {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    font-family: 'Courier New', monospace;
+    margin-left: 6px;
+  }
+  .terminal-body {
+    padding: 18px 20px;
+    font-family: 'Courier New', monospace;
+    font-size: 12.5px;
+    line-height: 1.8;
+  }
+  .line { display: flex; align-items: flex-start; gap: 8px; }
+  .prompt { color: #6366f1; flex-shrink: 0; }
+  .cmd { color: rgba(255,255,255,0.85); }
+  .out { color: rgba(255,255,255,0.4); padding-left: 16px; }
+  .out.green  { color: #86efac; }
+  .out.purple { color: #c084fc; }
+  .out.cyan   { color: #67e8f9; }
+  .out.yellow { color: #fde68a; }
+  .out.red    { color: #fca5a5; }
+  .cursor {
+    display: inline-block;
+    width: 8px; height: 14px;
+    background: #6366f1;
+    vertical-align: middle;
+    animation: blink 1s infinite;
+    margin-left: 2px;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* Flow indicators */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .flow-chip {
+    background: rgba(99,102,241,0.12);
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #a5b4fc;
+    letter-spacing: 0.04em;
+  }
+  .flow-arrow { color: rgba(255,255,255,0.25); font-size: 14px; }
+
+  /* Bottom bar */
+  .bottom-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .author {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .avatar {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 800;
+    color: white;
+  }
+  .author-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+  }
+  .author-title {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+  }
+  .github-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 100px;
+    padding: 8px 18px;
+  }
+  .github-icon { font-size: 18px; }
+  .github-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+    font-family: 'Courier New', monospace;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="grid-bg"></div>
+  <div class="blob1"></div>
+  <div class="blob2"></div>
+  <div class="blob3"></div>
+
+  <div class="content">
+    <!-- LEFT SIDE -->
+    <div style="max-width:660px">
+      <div class="badge">
+        <div class="badge-dot"></div>
+        <span class="badge-text">Open Source · 100% Free</span>
+      </div>
+
+      <div class="headline">
+        I built a bot that applies to<br>
+        <span class="highlight">300+ jobs</span><br>
+        while I sleep
+      </div>
+
+      <div class="sub">
+        AI-powered job hunter for Data Science &amp; ML roles — scrapes 34+ companies, scores every job, auto-fills applications with one click.
+      </div>
+
+      <div class="flow" style="margin-top:16px">
+        <span class="flow-chip">🔍 Scrape</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-chip">🧠 Score</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-chip">✨ Simplify Fill</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-chip">✅ Applied</span>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stats" style="max-width:660px">
+      <div class="stat-card indigo">
+        <div class="stat-icon">🏢</div>
+        <div class="stat-number">34+</div>
+        <div class="stat-label">Companies Scraped</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-icon">⚡</div>
+        <div class="stat-number">5min</div>
+        <div class="stat-label">Scan Interval</div>
+      </div>
+      <div class="stat-card cyan">
+        <div class="stat-icon">🎯</div>
+        <div class="stat-number">0–5</div>
+        <div class="stat-label">AI Match Score</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon">🚀</div>
+        <div class="stat-number">$0</div>
+        <div class="stat-label">Cost to Run</div>
+      </div>
+    </div>
+
+    <!-- BOTTOM -->
+    <div class="bottom-bar" style="max-width:660px">
+      <div class="author">
+        <div class="avatar">SC</div>
+        <div>
+          <div class="author-name">Suma Chidara</div>
+          <div class="author-title">Data Scientist · Seattle, WA</div>
+        </div>
+      </div>
+      <div class="github-badge">
+        <span class="github-icon">⭐</span>
+        <span class="github-text">github.com/sumach9/job-automation</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TERMINAL (right side) -->
+  <div class="terminal">
+    <div class="terminal-header">
+      <div class="dot red"></div>
+      <div class="dot yellow"></div>
+      <div class="dot green"></div>
+      <span class="terminal-title">job-bot · running</span>
+    </div>
+    <div class="terminal-body">
+      <div class="line"><span class="prompt">$</span><span class="cmd">node server.js</span></div>
+      <div class="line out green">✓ Server running on :3004</div>
+      <div class="line out cyan">→ Scanning 34 companies...</div>
+      <div style="height:6px"></div>
+      <div class="line out green">✓ Anthropic — 3 DS jobs</div>
+      <div class="line out green">✓ OpenAI — 7 ML jobs</div>
+      <div class="line out green">✓ Databricks — 5 jobs</div>
+      <div class="line out green">✓ Stripe — 2 jobs</div>
+      <div class="line out cyan">  ... 30 more companies</div>
+      <div style="height:6px"></div>
+      <div class="line out purple">★ Score 4.8 — Data Scientist @ Anthropic</div>
+      <div class="line out purple">★ Score 4.5 — ML Engineer @ OpenAI</div>
+      <div class="line out yellow">◈ Score 3.2 — Data Analyst @ Stripe</div>
+      <div style="height:6px"></div>
+      <div class="line out green">✓ 12 jobs applied via Simplify</div>
+      <div class="line out green">✓ 3 LinkedIn Easy Apply sent</div>
+      <div style="height:6px"></div>
+      <div class="line"><span class="prompt">$</span><span class="cmd">_</span><span class="cursor"></span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
