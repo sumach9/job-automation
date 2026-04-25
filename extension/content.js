@@ -1,282 +1,385 @@
 /**
- * OneTouch Apply — Content Script
- * Injected into every supported job page.
- * Detects the job, injects the floating button, handles one-touch apply.
+ * OneTouch Apply — Content Script v2
+ * Fixed: React synthetic events, LinkedIn Easy Apply flow, radio detection,
+ *        dynamic form retry, better label matching.
  */
 
-const API_BASE = "http://localhost:3004/api";
-const DEBOUNCE_MS = 800;
+const API_BASE   = "http://localhost:3004/api";
+const SITE       = detectSite();
+let   otBtn      = null;
+let   otToast    = null;
+let   isFillingNow = false;
 
-// ── Site detectors ────────────────────────────────────────────────────────────
-const SITES = {
-  linkedin:    () => location.hostname.includes("linkedin.com"),
-  indeed:      () => location.hostname.includes("indeed.com"),
-  greenhouse:  () => location.hostname.includes("greenhouse.io"),
-  lever:       () => location.hostname.includes("lever.co"),
-  ashby:       () => location.hostname.includes("ashbyhq.com"),
-  workday:     () => location.hostname.includes("myworkdayjobs.com") || location.hostname.includes("workday.com"),
-  glassdoor:   () => location.hostname.includes("glassdoor.com"),
-  ziprecruiter:() => location.hostname.includes("ziprecruiter.com"),
-  dice:        () => location.hostname.includes("dice.com"),
-  wellfound:   () => location.hostname.includes("wellfound.com"),
-};
-
+// ── Site detection ────────────────────────────────────────────────────────────
 function detectSite() {
-  return Object.keys(SITES).find((k) => SITES[k]()) || "other";
+  const h = location.hostname;
+  if (h.includes("linkedin.com"))       return "linkedin";
+  if (h.includes("indeed.com"))         return "indeed";
+  if (h.includes("greenhouse.io"))      return "greenhouse";
+  if (h.includes("lever.co"))           return "lever";
+  if (h.includes("ashbyhq.com"))        return "ashby";
+  if (h.includes("myworkdayjobs.com") ||
+      h.includes("workday.com"))        return "workday";
+  if (h.includes("glassdoor.com"))      return "glassdoor";
+  if (h.includes("ziprecruiter.com"))   return "ziprecruiter";
+  if (h.includes("dice.com"))           return "dice";
+  if (h.includes("wellfound.com"))      return "wellfound";
+  return "other";
 }
 
-// ── Job data scrapers per site ────────────────────────────────────────────────
+// ── Scrape job metadata from the current page ─────────────────────────────────
 function scrapeJobData() {
-  const site = detectSite();
+  const g  = (sel) => document.querySelector(sel)?.innerText?.trim() || "";
   const url = location.href;
-  const base = { url, site, scrapedAt: new Date().toISOString() };
 
-  if (site === "linkedin") {
-    return {
-      ...base,
-      title:    getText(".job-details-jobs-unified-top-card__job-title, h1.t-24") || document.title,
-      company:  getText(".job-details-jobs-unified-top-card__company-name, .topcard__org-name-link"),
-      location: getText(".job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet"),
-      easyApply: !!document.querySelector("button.jobs-apply-button[aria-label*='Easy Apply']"),
-      platform: "LinkedIn",
-    };
-  }
-  if (site === "indeed") {
-    return {
-      ...base,
-      title:    getText("h1.jobsearch-JobInfoHeader-title, h1[data-testid='jobsearch-JobInfoHeader-title']") || document.title,
-      company:  getText("[data-testid='inlineHeader-companyName'] a, .icl-u-lg-mr--sm"),
-      location: getText("[data-testid='inlineHeader-companyLocation']"),
-      platform: "Indeed",
-    };
-  }
-  if (site === "greenhouse") {
-    return {
-      ...base,
-      title:    getText("h1.app-title") || document.title,
-      company:  getText(".company-name") || location.hostname,
-      location: getText(".location") || getText(".offices"),
-      platform: "Greenhouse",
-      atsProvider: "Greenhouse",
-    };
-  }
-  if (site === "lever") {
-    return {
-      ...base,
-      title:    getText(".posting-headline h2") || document.title,
-      company:  getText(".main-header-logo img")?.alt || location.pathname.split("/")[1],
-      location: getText(".posting-categories .location"),
-      platform: "Lever",
-      atsProvider: "Lever",
-    };
-  }
-  if (site === "ashby") {
-    return {
-      ...base,
-      title:    getText("h1") || document.title,
-      company:  getText(".ashby-job-posting-company-name") || document.title.split(" at ")[1],
-      location: getText(".ashby-job-posting-brief-location"),
-      platform: "Ashby",
-      atsProvider: "Ashby",
-    };
-  }
-  if (site === "workday") {
-    return {
-      ...base,
-      title:    getText("[data-automation-id='jobPostingHeader'], h2[data-automation-id]") || document.title,
-      company:  document.title.split("|").pop()?.trim() || "",
-      location: getText("[data-automation-id='locations']"),
-      platform: "Workday",
-      atsProvider: "Workday",
-    };
-  }
-  // Generic fallback
-  return {
-    ...base,
-    title:    getText("h1") || document.title,
-    company:  getText("[class*='company'], [class*='employer'], [itemprop='hiringOrganization']") || "",
-    location: getText("[class*='location'], [itemprop='jobLocation']") || "",
-    platform: "Other",
-  };
+  const data = { url, site: SITE, scrapedAt: new Date().toISOString() };
+
+  if (SITE === "linkedin") return { ...data,
+    title:    g("h1.job-details-jobs-unified-top-card__job-title, h1.t-24, h1"),
+    company:  g(".job-details-jobs-unified-top-card__company-name a, .job-details-jobs-unified-top-card__company-name"),
+    location: g(".job-details-jobs-unified-top-card__bullet"),
+    platform: "LinkedIn", easyApply: !!document.querySelector("button.jobs-apply-button") };
+
+  if (SITE === "greenhouse") return { ...data,
+    title:    g("h1.app-title, #app_title, h1"),
+    company:  g(".company-name") || location.hostname.split(".")[0],
+    location: g(".location, .offices"),
+    platform: "Greenhouse", atsProvider: "Greenhouse" };
+
+  if (SITE === "lever") return { ...data,
+    title:    g(".posting-headline h2, h2"),
+    company:  g(".main-header-logo img")?.alt || location.pathname.split("/")[1],
+    location: g(".posting-categories .location"),
+    platform: "Lever", atsProvider: "Lever" };
+
+  if (SITE === "ashby") return { ...data,
+    title:    g("h1"),
+    company:  g(".ashby-job-posting-company-name") || document.title.split(" at ").pop(),
+    location: g(".ashby-job-posting-brief-location"),
+    platform: "Ashby", atsProvider: "Ashby" };
+
+  if (SITE === "workday") return { ...data,
+    title:    g("[data-automation-id='jobPostingHeader'], h2"),
+    company:  document.title.split("|").pop()?.trim() || "",
+    location: g("[data-automation-id='locations']"),
+    platform: "Workday", atsProvider: "Workday" };
+
+  if (SITE === "indeed") return { ...data,
+    title:    g("h1[data-testid='jobsearch-JobInfoHeader-title'], h1"),
+    company:  g("[data-testid='inlineHeader-companyName'] a"),
+    location: g("[data-testid='inlineHeader-companyLocation']"),
+    platform: "Indeed" };
+
+  return { ...data,
+    title:    g("h1"),
+    company:  g("[class*='company'],[itemprop='hiringOrganization']"),
+    location: g("[class*='location'],[itemprop='jobLocation']"),
+    platform: "Other" };
 }
 
-function getText(selector) {
-  return document.querySelector(selector)?.innerText?.trim() || "";
-}
-
-// ── Form filler ───────────────────────────────────────────────────────────────
+// ── Profile store ─────────────────────────────────────────────────────────────
 async function getProfile() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get("profile", (d) => resolve(d.profile || {}));
+  return new Promise((ok) => chrome.storage.sync.get("profile", (d) => ok(d.profile || {})));
+}
+
+// ── Value inference ───────────────────────────────────────────────────────────
+function inferValue(rawLabel, profile) {
+  const l = (rawLabel || "").toLowerCase().replace(/[*:]/g, "").trim();
+  if (/^first(\s*name)?$/.test(l))             return profile.firstName || profile.name?.split(" ")[0] || "";
+  if (/^last(\s*name)?$/.test(l))              return profile.lastName  || profile.name?.split(" ").slice(-1)[0] || "";
+  if (/full.?name|your name/.test(l))          return profile.name || "";
+  if (l.includes("email"))                     return profile.email || "";
+  if (l.includes("phone") || l.includes("mobile") || l.includes("tel")) return profile.phone || "";
+  if (l.includes("city") || l.includes("location") || l.includes("city, state")) return profile.location || "";
+  if (l.includes("linkedin"))                  return profile.linkedinUrl || "";
+  if (l.includes("github"))                    return profile.github || "";
+  if (l.includes("portfolio") || l.includes("website") || l.includes("personal url")) return profile.website || "";
+  if ((l.includes("year") || l.includes("years")) && l.includes("exp")) return profile.yearsExperience || "";
+  if (l.includes("salary") || l.includes("compensation") || l.includes("pay")) return profile.expectedSalary || "";
+  if (l.includes("zip") || l.includes("postal"))     return profile.zipCode || "";
+  if (l.includes("start date") || l.includes("available")) return "2 weeks";
+  if (l.includes("address") && !l.includes("email")) return profile.location || "";
+  return "";
+}
+
+// ── Get label text for any element ───────────────────────────────────────────
+function getLabelText(el) {
+  // 1. <label for="id">
+  if (el.id) {
+    const lb = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (lb) return lb.innerText.replace(lb.querySelector("*")?.innerText || "", "").trim() || lb.innerText.trim();
+  }
+  // 2. Ancestor label wrapping the input
+  const wrapping = el.closest("label");
+  if (wrapping) {
+    const clone = wrapping.cloneNode(true);
+    clone.querySelectorAll("input,select,textarea").forEach(n => n.remove());
+    return clone.innerText.trim();
+  }
+  // 3. Sibling / parent label in a form field container
+  const field = el.closest(".field,.form-group,.form-row,.input-wrapper,.question,[class*='Field'],[class*='field'],[class*='FormItem']");
+  if (field) {
+    const lb = field.querySelector("label,legend,[class*='label'],[class*='Label'],p.label");
+    if (lb && !lb.contains(el)) return lb.innerText.trim();
+  }
+  // 4. aria-label / placeholder / name fallback
+  return el.getAttribute("aria-label") || el.placeholder || el.name || "";
+}
+
+function getGroupLabel(radioOrCheck) {
+  const fs = radioOrCheck.closest("fieldset");
+  if (fs) return fs.querySelector("legend")?.innerText?.trim() || "";
+  const field = radioOrCheck.closest(".field,.form-group,.question,[class*='Field'],[class*='field'],[class*='Question']");
+  if (field) {
+    const heading = field.querySelector("label:not(:has(input)),legend,p,h3,h4,[class*='label'],[class*='Label']");
+    if (heading) return heading.innerText.trim();
+  }
+  return radioOrCheck.name || "";
+}
+
+// ── Set value in a way React / Vue / Angular all pick up ─────────────────────
+function setNativeValue(el, value) {
+  // React stores its internal state via a property descriptor on the prototype
+  const proto = Object.getPrototypeOf(el);
+  const desc  = Object.getOwnPropertyDescriptor(proto, "value")
+             || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,  "value")
+             || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,"value");
+
+  if (desc?.set) {
+    desc.set.call(el, value);
+  } else {
+    el.value = value;
+  }
+
+  // Fire a full suite of events so every framework sees the change
+  ["keydown","keypress","input","keyup","change","blur"].forEach((evtName) => {
+    el.dispatchEvent(new Event(evtName, { bubbles: true, cancelable: true }));
   });
 }
 
-async function fillForms() {
+// ── Sleep helper ──────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── Core fill function ────────────────────────────────────────────────────────
+async function fillForms(root = document) {
   const profile = await getProfile();
-  const site = detectSite();
+  if (!profile.email && !profile.name) {
+    showToast("⚠ Set your profile first — click the ⚡ extension icon", "error", 5000);
+    return 0;
+  }
+
   let filled = 0;
 
-  // ── Text inputs ──
-  const inputs = document.querySelectorAll(
-    "input[type='text'], input[type='email'], input[type='tel'], input[type='url'], input[type='number']"
-  );
-  for (const input of inputs) {
-    if (input.value) continue;
-    const label = getLabelText(input).toLowerCase();
-    let val = inferValue(label, profile);
-    if (val) { await setNativeValue(input, val); filled++; }
+  // 1. TEXT / EMAIL / TEL / URL / NUMBER inputs
+  for (const inp of root.querySelectorAll(
+    "input[type='text'],input[type='email'],input[type='tel'],input[type='url'],input[type='number'],input:not([type])"
+  )) {
+    if (!inp.offsetParent) continue;                   // hidden
+    if (inp.value)          continue;                   // already filled
+    if (inp.readOnly || inp.disabled) continue;
+    const label = getLabelText(inp);
+    const val   = inferValue(label, profile);
+    if (val) { setNativeValue(inp, val); filled++; await sleep(40); }
   }
 
-  // ── Textareas ──
-  const areas = document.querySelectorAll("textarea");
-  for (const area of areas) {
-    if (area.value) continue;
+  // 2. TEXTAREA
+  for (const area of root.querySelectorAll("textarea")) {
+    if (!area.offsetParent || area.value || area.readOnly) continue;
     const label = getLabelText(area).toLowerCase();
-    if (label.includes("cover") || label.includes("letter") || label.includes("message")) {
-      if (profile.coverLetter) { await setNativeValue(area, profile.coverLetter); filled++; }
-    } else if (label.includes("summary") || label.includes("about")) {
-      if (profile.summary) { await setNativeValue(area, profile.summary); filled++; }
-    }
+    let val = "";
+    if (label.includes("cover") || label.includes("letter") || label.includes("message") || label.includes("note"))
+      val = profile.coverLetter || "";
+    else if (label.includes("summary") || label.includes("about") || label.includes("bio"))
+      val = profile.summary || "";
+    else if (label.includes("address") && !label.includes("email"))
+      val = profile.location || "";
+    if (val) { setNativeValue(area, val); filled++; await sleep(40); }
   }
 
-  // ── Selects / dropdowns ──
-  const selects = document.querySelectorAll("select");
-  for (const sel of selects) {
-    if (sel.value) continue;
+  // 3. SELECT (dropdowns)
+  for (const sel of root.querySelectorAll("select")) {
+    if (!sel.offsetParent || sel.disabled) continue;
     const label = getLabelText(sel).toLowerCase();
-    if (label.includes("country")) setSelectByText(sel, "United States");
-    else if (label.includes("authorize") || label.includes("work")) setSelectByIndex(sel, 1);
-    else if (label.includes("gender") || label.includes("pronoun")) setSelectByText(sel, "Prefer not to say");
-    else if (label.includes("race") || label.includes("ethnicity")) setSelectByText(sel, "Decline to state");
-    else if (label.includes("veteran")) setSelectByText(sel, "I am not a protected veteran");
-    else if (label.includes("disability")) setSelectByText(sel, "I do not have a disability");
-    filled++;
+    if (label.includes("country"))              { pickSelect(sel, ["United States","US","USA"]); filled++; }
+    else if (label.includes("sponsor") || label.includes("visa"))
+                                                { pickSelect(sel, ["No","Not Required"]); filled++; }
+    else if (label.includes("authoriz") || label.includes("work in") || label.includes("eligible"))
+                                                { pickSelect(sel, ["Yes"]); filled++; }
+    else if (label.includes("gender") || label.includes("pronoun"))
+                                                { pickSelect(sel, ["Prefer not","Decline","Rather not"]); filled++; }
+    else if (label.includes("race") || label.includes("ethnicity"))
+                                                { pickSelect(sel, ["Decline","Rather not","Prefer not"]); filled++; }
+    else if (label.includes("veteran"))         { pickSelect(sel, ["not a protected","not a veteran","No"]); filled++; }
+    else if (label.includes("disability"))      { pickSelect(sel, ["not have a disability","No","Decline"]); filled++; }
+    else if (label.includes("notice") || label.includes("start"))
+                                                { pickSelect(sel, ["2 weeks","Immediately","1 month"]); filled++; }
   }
 
-  // ── Yes/No radios ──
-  for (const radio of document.querySelectorAll("input[type='radio']")) {
-    const label = getLabelText(radio).toLowerCase();
-    if (label === "yes" || label === "no") {
-      const groupLabel = getGroupLabel(radio).toLowerCase();
-      const shouldCheckYes =
-        groupLabel.includes("authorize") || groupLabel.includes("eligible") ||
-        groupLabel.includes("legally") || groupLabel.includes("work in");
-      if ((shouldCheckYes && label === "yes") || (!shouldCheckYes && label === "no")) {
-        radio.click(); filled++;
-      }
-    }
-  }
+  // 4. RADIO buttons — handle sensitive ones safely
+  const seen = new Set();
+  for (const radio of root.querySelectorAll("input[type='radio']")) {
+    if (!radio.offsetParent || seen.has(radio.name)) continue;
+    seen.add(radio.name);
+    const groupLabel = getGroupLabel(radio).toLowerCase();
+    const group      = [...root.querySelectorAll(`input[type='radio'][name="${CSS.escape(radio.name)}"]`)];
 
-  // ── Resume upload ──
-  if (profile.resumeData && profile.resumeFileName) {
-    const fileInputs = document.querySelectorAll("input[type='file']");
-    for (const fi of fileInputs) {
-      if (fi.accept?.includes("pdf") || fi.accept?.includes("doc") || !fi.accept) {
-        try {
-          const blob = dataURLtoBlob(profile.resumeData);
-          const file = new File([blob], profile.resumeFileName, { type: blob.type });
-          const dt = new DataTransfer();
-          dt.items.add(file);
-          fi.files = dt.files;
-          fi.dispatchEvent(new Event("change", { bubbles: true }));
-          filled++;
-        } catch {}
+    const pick = (terms) => {
+      for (const term of terms) {
+        const r = group.find(r => (r.closest("label")?.innerText || r.value || "").toLowerCase().includes(term.toLowerCase()));
+        if (r) { r.click(); r.dispatchEvent(new Event("change",{bubbles:true})); filled++; return true; }
       }
+      return false;
+    };
+
+    if (groupLabel.includes("gender") || groupLabel.includes("pronoun"))
+      pick(["prefer not","decline","rather not","non-binary"]);
+    else if (groupLabel.includes("race") || groupLabel.includes("ethnicity"))
+      pick(["decline","prefer not","rather not"]);
+    else if (groupLabel.includes("veteran"))
+      pick(["not a protected","not a veteran","i am not","no"]);
+    else if (groupLabel.includes("disability"))
+      pick(["not have","i don't","no","decline"]);
+    else if (groupLabel.includes("authoriz") || groupLabel.includes("eligible") || groupLabel.includes("legally"))
+      pick(["yes"]);
+    else if (groupLabel.includes("sponsor") || groupLabel.includes("visa"))
+      pick(["no"]);
+    // generic yes/no: default to yes for capability questions
+    else if (group.length === 2) {
+      const isCapability = groupLabel.includes("work") || groupLabel.includes("experience") ||
+                           groupLabel.includes("skill") || groupLabel.includes("familiar") ||
+                           groupLabel.includes("willing") || groupLabel.includes("able to");
+      pick(isCapability ? ["yes"] : ["no"]);
     }
   }
 
   return filled;
 }
 
-function inferValue(label, profile) {
-  if (label.includes("first name") || label === "first") return profile.firstName || profile.name?.split(" ")[0] || "";
-  if (label.includes("last name") || label === "last") return profile.lastName || profile.name?.split(" ").slice(-1)[0] || "";
-  if (label.includes("full name") || label === "name") return profile.name || "";
-  if (label.includes("email")) return profile.email || "";
-  if (label.includes("phone") || label.includes("mobile")) return profile.phone || "";
-  if (label.includes("city") || label.includes("location")) return profile.location || "Seattle, WA";
-  if (label.includes("linkedin")) return profile.linkedinUrl || "";
-  if (label.includes("github")) return profile.github || "";
-  if (label.includes("portfolio") || label.includes("website")) return profile.website || "";
-  if (label.includes("year") && label.includes("experience")) return profile.yearsExperience || "3";
-  if (label.includes("salary") || label.includes("expected comp")) return profile.expectedSalary || "";
-  if (label.includes("start date") || label.includes("available")) return "2 weeks";
-  if (label.includes("zip") || label.includes("postal")) return profile.zipCode || "98101";
-  return "";
-}
-
-function getLabelText(el) {
-  if (el.id) {
-    const lbl = document.querySelector(`label[for="${el.id}"]`);
-    if (lbl) return lbl.innerText.trim();
+// ── Select helpers ────────────────────────────────────────────────────────────
+function pickSelect(sel, terms) {
+  const opts = [...sel.options];
+  for (const term of terms) {
+    const opt = opts.find(o => o.text.toLowerCase().includes(term.toLowerCase()));
+    if (opt) {
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
   }
-  const parent = el.closest("label, [class*='field'], [class*='form-group'], [class*='input-container']");
-  if (parent) {
-    const lbl = parent.querySelector("label, [class*='label'], legend");
-    if (lbl && lbl !== el) return lbl.innerText.trim();
+}
+
+// ── LinkedIn specific: click Easy Apply, wait for modal, fill ─────────────────
+async function handleLinkedIn(job) {
+  // Check if Easy Apply modal is already open
+  const modal = document.querySelector(".jobs-easy-apply-content, .jobs-apply-form");
+  if (modal) {
+    return await fillForms(modal);
   }
-  return el.placeholder || el.getAttribute("aria-label") || el.name || "";
-}
 
-function getGroupLabel(radio) {
-  const fieldset = radio.closest("fieldset");
-  if (fieldset) return fieldset.querySelector("legend")?.innerText || "";
-  const parent = radio.closest("[class*='field'], [class*='form-group'], [class*='question']");
-  return parent?.querySelector("[class*='label'], p, h3, h4")?.innerText || "";
-}
-
-async function setNativeValue(el, value) {
-  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-    || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
-  if (nativeInputValueSetter) {
-    nativeInputValueSetter.call(el, value);
-  } else {
-    el.value = value;
+  // Click the Easy Apply button
+  const easyApplyBtn = document.querySelector(
+    "button.jobs-apply-button[aria-label*='Easy Apply'], button.jobs-apply-button"
+  );
+  if (!easyApplyBtn) {
+    showToast("❌ No Easy Apply button — opening job page in new tab", "error");
+    return 0;
   }
-  el.dispatchEvent(new Event("input",  { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-  el.dispatchEvent(new Event("blur",   { bubbles: true }));
-  await sleep(60);
+
+  easyApplyBtn.click();
+  showToast("📋 Opening Easy Apply form…", "info", 2000);
+
+  // Wait for modal to appear (up to 5s)
+  for (let i = 0; i < 25; i++) {
+    await sleep(200);
+    const m = document.querySelector(".jobs-easy-apply-content, .jobs-apply-form, [aria-label='Easy Apply']");
+    if (m) {
+      await sleep(600); // let form fully render
+      return await fillForms(m);
+    }
+  }
+  showToast("⚠ Easy Apply modal didn't open — try clicking Easy Apply manually", "error");
+  return 0;
 }
 
-function setSelectByText(sel, text) {
-  const opt = [...sel.options].find((o) => o.text.toLowerCase().includes(text.toLowerCase()));
-  if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+// ── Workday specific: multi-step forms ───────────────────────────────────────
+async function handleWorkday(job) {
+  let totalFilled = 0;
+
+  // Fill current visible step
+  const stepContainer = document.querySelector("[data-automation-id='pageContainer'], main, .wd-popup-content") || document;
+  totalFilled += await fillForms(stepContainer);
+
+  // Try to advance through steps automatically
+  for (let step = 0; step < 5; step++) {
+    await sleep(500);
+    const nextBtn = document.querySelector(
+      "[data-automation-id='nextButton'], [data-automation-id='bottom-navigation-next-button']"
+    );
+    if (!nextBtn || nextBtn.disabled) break;
+    nextBtn.click();
+    await sleep(1200);
+    totalFilled += await fillForms(document.querySelector("[data-automation-id='pageContainer']") || document);
+  }
+
+  return totalFilled;
 }
 
-function setSelectByIndex(sel, idx) {
-  if (sel.options[idx]) { sel.selectedIndex = idx; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+// ── Master apply handler ──────────────────────────────────────────────────────
+async function oneTouchApply(job) {
+  if (isFillingNow) return;
+  isFillingNow = true;
+
+  setButtonState("loading", "Filling form…");
+  showToast("⚡ Scanning and filling fields…", "info");
+
+  try {
+    let filled = 0;
+
+    if (SITE === "linkedin")   filled = await handleLinkedIn(job);
+    else if (SITE === "workday") filled = await handleWorkday(job);
+    else                         filled = await fillForms();
+
+    if (filled === 0) {
+      showToast("⚠ No empty fields found — form may already be filled or not visible yet", "error", 4000);
+      setButtonState("error", "No fields found");
+      setTimeout(() => setButtonState("default", job.company || SITE), 3000);
+      return;
+    }
+
+    showToast(`✅ ${filled} fields filled — review and click Submit`, "success", 5000);
+    setButtonState("success", `${filled} fields filled!`);
+    highlightSubmitButton();
+
+    // Track to dashboard
+    try {
+      await fetch(`${API_BASE}/onetouch-apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...job, filledFields: filled }),
+      });
+    } catch {}
+
+  } catch (err) {
+    showToast(`⚠ Error: ${err.message}`, "error");
+    setButtonState("error", "Error — retry");
+    setTimeout(() => setButtonState("default", job.company || SITE), 4000);
+  } finally {
+    isFillingNow = false;
+  }
 }
 
-function dataURLtoBlob(dataURL) {
-  const [header, data] = dataURL.split(",");
-  const mime = header.match(/:(.*?);/)[1];
-  const bytes = atob(data);
-  const arr = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
-
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-
-// ── OneTouch button ───────────────────────────────────────────────────────────
-let otBtn = null;
-let otToast = null;
-
-function injectButton(job) {
-  if (document.getElementById("onetouch-btn")) return;
-
-  otBtn = document.createElement("button");
-  otBtn.id = "onetouch-btn";
-  otBtn.innerHTML = `
-    <span class="ot-icon">⚡</span>
-    <div>
-      <div class="ot-label">OneTouch Apply</div>
-      <div class="ot-sub">${job.company || job.site}</div>
-    </div>
-  `;
-  otBtn.addEventListener("click", () => oneTouchApply(job));
-  document.body.appendChild(otBtn);
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function setButtonState(state, label) {
+  if (!otBtn) return;
+  const states = {
+    default: { cls: "",           icon: "⚡", text: "OneTouch Apply" },
+    loading: { cls: "ot-loading", icon: "⏳", text: label },
+    success: { cls: "ot-success", icon: "✅", text: label },
+    error:   { cls: "ot-error",   icon: "⚠",  text: label },
+  };
+  const s = states[state] || states.default;
+  otBtn.className = s.cls;
+  otBtn.innerHTML = `<span class="ot-icon">${s.icon}</span><div><div class="ot-label">${s.text}</div></div>`;
 }
 
 function showToast(msg, type = "info", duration = 3500) {
@@ -286,74 +389,35 @@ function showToast(msg, type = "info", duration = 3500) {
   otToast.className = `ot-toast-${type}`;
   otToast.innerText = msg;
   document.body.appendChild(otToast);
-  setTimeout(() => otToast?.remove(), duration);
+  if (duration > 0) setTimeout(() => otToast?.remove(), duration);
 }
 
-async function oneTouchApply(job) {
-  // Update button state
-  otBtn.className = "ot-loading";
-  otBtn.innerHTML = `<span class="ot-icon">⏳</span><div><div class="ot-label">Filling form…</div></div>`;
-  showToast("🔍 Scanning form fields…", "info");
-
-  try {
-    // 1. Fill all form fields
-    const filled = await fillForms();
-    showToast(`✅ Filled ${filled} fields — scroll down to review`, "success", 4000);
-
-    // 2. Send job to dashboard backend for tracking
-    const jobData = { ...job, status: "onetouch-filled", filledFields: filled };
-    try {
-      await fetch(`${API_BASE}/onetouch-apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(jobData),
-      });
-    } catch {} // silently fail if server not running
-
-    // 3. Update button to success
-    otBtn.className = "ot-success";
-    otBtn.innerHTML = `
-      <span class="ot-icon">✅</span>
-      <div>
-        <div class="ot-label">Filled! Click Submit</div>
-        <div class="ot-sub">${filled} fields auto-filled</div>
-      </div>
-    `;
-
-    // 4. Highlight submit button
-    highlightSubmit();
-
-  } catch (err) {
-    otBtn.className = "ot-error";
-    otBtn.innerHTML = `<span class="ot-icon">⚠</span><div><div class="ot-label">Error — try again</div></div>`;
-    showToast(`Error: ${err.message}`, "error");
-    setTimeout(() => {
-      otBtn.className = "";
-      otBtn.innerHTML = `<span class="ot-icon">⚡</span><div><div class="ot-label">OneTouch Apply</div></div>`;
-    }, 3000);
-  }
-}
-
-function highlightSubmit() {
-  const submitSelectors = [
+function highlightSubmitButton() {
+  const selectors = [
     "button[aria-label*='Submit application']",
-    "button[type='submit']:not([disabled])",
+    "button[type='submit']",
     "input[type='submit']",
-    "button:last-of-type[type='button']",
+    "[data-automation-id='bottom-navigation-next-button']",
+    "button[aria-label*='Review']",
+    "button:last-of-type",
   ];
-  for (const sel of submitSelectors) {
-    const btn = document.querySelector(sel);
-    if (btn && btn.offsetParent) {
-      btn.style.outline = "3px solid #6366f1";
-      btn.style.outlineOffset = "3px";
-      btn.scrollIntoView({ behavior: "smooth", block: "center" });
-      break;
+  for (const sel of selectors) {
+    const btns = document.querySelectorAll(sel);
+    for (const btn of btns) {
+      if (btn.offsetParent && !btn.disabled && btn !== otBtn) {
+        btn.style.outline      = "3px solid #6366f1";
+        btn.style.outlineOffset = "3px";
+        btn.style.boxShadow    = "0 0 16px rgba(99,102,241,0.6)";
+        btn.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
     }
   }
 }
 
-// ── Score badge injection ─────────────────────────────────────────────────────
+// ── Score badge ───────────────────────────────────────────────────────────────
 async function injectScoreBadge(job) {
+  if (!job.title) return;
   try {
     const res = await fetch(`${API_BASE}/score-job`, {
       method: "POST",
@@ -363,48 +427,55 @@ async function injectScoreBadge(job) {
     if (!res.ok) return;
     const { score, label } = await res.json();
     if (score == null) return;
-
-    const stars = score >= 4 ? "🟢" : score >= 3 ? "🟡" : "🔴";
-    const badge = document.createElement("span");
-    badge.className = "ot-score-badge";
-    badge.title = `OneTouch Match Score: ${score}/5 — ${label}`;
-    badge.innerHTML = `${stars} ${score} <small style="opacity:.7;font-weight:500">/ 5 match</small>`;
-
-    // Inject near the job title
-    const titleEl = document.querySelector(
-      "h1.job-details-jobs-unified-top-card__job-title, h1.t-24, h1.posting-headline, h1, .app-title"
+    const dot = score >= 4 ? "🟢" : score >= 3 ? "🟡" : "🔴";
+    const badge = Object.assign(document.createElement("span"), {
+      className: "ot-score-badge",
+      title:     `OneTouch match: ${score}/5 — ${label}`,
+      innerHTML: `${dot} ${score} <small style="font-weight:500;opacity:.7">/ 5</small>`,
+    });
+    const title = document.querySelector(
+      "h1.job-details-jobs-unified-top-card__job-title,h1.t-24,h2.posting-headline,h1.app-title,h1,[data-automation-id='jobPostingHeader'],h1"
     );
-    if (titleEl) titleEl.appendChild(badge);
+    if (title && !title.querySelector(".ot-score-badge")) title.appendChild(badge);
   } catch {}
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-let initTimer = null;
-
-function init() {
-  clearTimeout(initTimer);
-  initTimer = setTimeout(async () => {
-    const site = detectSite();
-    if (site === "other") return;
-
-    const job = scrapeJobData();
-    if (!job.title) return; // not a job page
-
-    injectButton(job);
-    injectScoreBadge(job);
-  }, DEBOUNCE_MS);
+// ── Inject the floating button ────────────────────────────────────────────────
+function injectButton(job) {
+  if (document.getElementById("onetouch-btn")) return;
+  otBtn = document.createElement("button");
+  otBtn.id = "onetouch-btn";
+  otBtn.innerHTML = `<span class="ot-icon">⚡</span><div><div class="ot-label">OneTouch Apply</div><div class="ot-sub">${job.company || SITE}</div></div>`;
+  otBtn.addEventListener("click", () => oneTouchApply(job));
+  document.body.appendChild(otBtn);
 }
 
-// Re-init on SPA navigation (LinkedIn, Indeed are SPAs)
-const observer = new MutationObserver(() => {
-  const existing = document.getElementById("onetouch-btn");
-  if (existing) {
-    // Check if still on a job page
-    if (!scrapeJobData().title) existing.remove();
-  } else {
-    init();
-  }
-});
+// ── Init & SPA re-detection ───────────────────────────────────────────────────
+let _initTimer = null;
+let _lastUrl   = "";
 
-observer.observe(document.body, { childList: true, subtree: true });
-init();
+function tryInit() {
+  clearTimeout(_initTimer);
+  _initTimer = setTimeout(() => {
+    if (SITE === "other") return;
+    const job = scrapeJobData();
+    if (!job.title) return;                    // not a job detail page
+    injectButton(job);
+    injectScoreBadge(job);
+  }, 900);
+}
+
+// Watch for SPA URL changes (LinkedIn, Indeed, Glassdoor are SPAs)
+new MutationObserver(() => {
+  if (location.href !== _lastUrl) {
+    _lastUrl = location.href;
+    document.getElementById("onetouch-btn")?.remove();
+    otBtn = null;
+    tryInit();
+  } else {
+    // Re-check if button got removed by a framework re-render
+    if (!document.getElementById("onetouch-btn")) tryInit();
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
+tryInit();
