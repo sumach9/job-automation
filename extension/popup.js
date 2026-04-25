@@ -47,9 +47,16 @@ chrome.storage.sync.get("profile", ({ profile }) => {
   set("f-github",   profile.github);
   set("f-salary",   profile.expectedSalary);
   set("f-exp",      profile.yearsExperience);
+  set("f-school",   profile.school);
+  const degreeStr = [profile.degree, profile.major].filter(Boolean).join(" ");
+  if (degreeStr) document.getElementById("f-degree").value = degreeStr;
+  set("f-cover",    profile.coverLetter);
+});
 
-  if (profile.resumeFileName) {
-    document.getElementById("resume-name").textContent = `✓ ${profile.resumeFileName}`;
+// Check local storage for resume (stored separately to avoid 100KB sync limit)
+chrome.storage.local.get(["resumeData", "resumeFileName"], ({ resumeFileName }) => {
+  if (resumeFileName) {
+    document.getElementById("resume-name").textContent = `✓ ${resumeFileName}`;
     document.getElementById("resume-name").style.display = "";
     document.getElementById("resume-zone").classList.add("has-file");
   }
@@ -57,10 +64,12 @@ chrome.storage.sync.get("profile", ({ profile }) => {
 
 // ── Save profile ──────────────────────────────────────────────────────────────
 document.getElementById("save-btn").addEventListener("click", async () => {
+  const nameVal = document.getElementById("f-name").value.trim();
+  const degreeVal = document.getElementById("f-degree").value.trim();
   const profile = {
-    name:           document.getElementById("f-name").value.trim(),
-    firstName:      document.getElementById("f-name").value.trim().split(" ")[0],
-    lastName:       document.getElementById("f-name").value.trim().split(" ").slice(-1)[0],
+    name:           nameVal,
+    firstName:      nameVal.split(" ")[0],
+    lastName:       nameVal.split(" ").slice(-1)[0],
     email:          document.getElementById("f-email").value.trim(),
     phone:          document.getElementById("f-phone").value.trim(),
     location:       document.getElementById("f-location").value.trim(),
@@ -68,14 +77,17 @@ document.getElementById("save-btn").addEventListener("click", async () => {
     github:         document.getElementById("f-github").value.trim(),
     expectedSalary: document.getElementById("f-salary").value.trim(),
     yearsExperience:document.getElementById("f-exp").value.trim(),
+    school:         document.getElementById("f-school").value.trim(),
+    degree:         degreeVal.split(" ")[0] || "Bachelor's",
+    major:          degreeVal.includes(" ") ? degreeVal.split(" ").slice(1).join(" ") : degreeVal,
+    coverLetter:    document.getElementById("f-cover").value.trim(),
     zipCode:        "98101",
     savedAt:        new Date().toISOString(),
   };
 
-  // Preserve resume data if already saved
-  chrome.storage.sync.get("profile", (d) => {
-    if (d.profile?.resumeData)  profile.resumeData     = d.profile.resumeData;
-    if (d.profile?.resumeFileName) profile.resumeFileName = d.profile.resumeFileName;
+  // Preserve resumeFileName reference in sync profile (actual data is in local storage)
+  chrome.storage.local.get("resumeFileName", ({ resumeFileName }) => {
+    if (resumeFileName) profile.resumeFileName = resumeFileName;
     chrome.runtime.sendMessage({ type: "SAVE_PROFILE", profile }, () => {
       showToast("✅ Profile saved!", "success");
     });
@@ -106,14 +118,17 @@ function handleResumeFile(file) {
   const reader = new FileReader();
   reader.onload = (ev) => {
     const resumeData = ev.target.result;
-    chrome.storage.sync.get("profile", ({ profile }) => {
-      const updated = { ...(profile || {}), resumeData, resumeFileName: file.name };
-      chrome.storage.sync.set({ profile: updated }, () => {
-        document.getElementById("resume-name").textContent = `✓ ${file.name}`;
-        document.getElementById("resume-name").style.display = "";
-        document.getElementById("resume-zone").classList.add("has-file");
-        showToast("📄 Resume saved!", "success");
+    // Store resume in local storage (no 100KB sync limit)
+    chrome.storage.local.set({ resumeData, resumeFileName: file.name }, () => {
+      // Also update fileName reference in sync profile
+      chrome.storage.sync.get("profile", ({ profile }) => {
+        const updated = { ...(profile || {}), resumeFileName: file.name };
+        chrome.storage.sync.set({ profile: updated });
       });
+      document.getElementById("resume-name").textContent = `✓ ${file.name}`;
+      document.getElementById("resume-name").style.display = "";
+      document.getElementById("resume-zone").classList.add("has-file");
+      showToast("📄 Resume saved!", "success");
     });
   };
   reader.readAsDataURL(file);
