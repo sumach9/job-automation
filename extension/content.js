@@ -11,9 +11,10 @@
 
 const API_BASE   = "http://localhost:3004/api";
 const SITE       = detectSite();
-let   otBtn      = null;
-let   otToast    = null;
+let   otBtn        = null;
+let   otToast      = null;
 let   isFillingNow = false;
+let   lastRecordId = null;   // id returned by /api/onetouch-apply, used to mark "applied" on submit
 
 // ── Site detection ────────────────────────────────────────────────────────────
 function detectSite() {
@@ -596,9 +597,9 @@ async function oneTouchApply(job) {
     // Notify badge counter
     chrome.runtime.sendMessage({ type: "JOB_APPLIED" });
 
-    // Track to dashboard (include tailored data)
+    // Track to dashboard as "onetouch-filled" and capture the record id
     try {
-      await fetch(`${API_BASE}/onetouch-apply`, {
+      const trackResp = await fetch(`${API_BASE}/onetouch-apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -608,6 +609,12 @@ async function oneTouchApply(job) {
           tailoredAnswers: !!tailored,
         }),
       });
+      const trackData = await trackResp.json();
+      if (trackData?.id) {
+        lastRecordId = trackData.id;
+        // Hook the submit button — when clicked, auto-mark as "applied"
+        watchSubmitAndMarkApplied(lastRecordId);
+      }
     } catch {}
 
   } catch (err) {
@@ -667,6 +674,60 @@ function highlightSubmitButton() {
       }
     }
   }
+}
+
+// ── Submit watcher — marks record as "applied" when user clicks Submit ────────
+function watchSubmitAndMarkApplied(recordId) {
+  const SUBMIT_SELECTORS = [
+    "button[aria-label*='Submit application']",
+    "button[type='submit']:not(#onetouch-btn)",
+    "input[type='submit']",
+    "[data-automation-id='bottom-navigation-next-button']",
+    "button[aria-label*='Review']",
+    ".postings-btn",
+    "button.btn-apply, a.btn-apply",
+    "button[data-qa='btn-submit']",
+  ];
+
+  function markApplied() {
+    // Fire-and-forget PATCH to flip status → applied
+    fetch(`${API_BASE}/applications/${recordId}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stage: "applied" }),
+    }).catch(() => {});
+    // Show confirmation toast
+    showToast("✅ Application submitted & saved to dashboard!", "success", 4000);
+    // Remove listener to avoid double-firing
+    cleanupListeners();
+  }
+
+  const handlers = [];
+
+  function cleanupListeners() {
+    handlers.forEach(({ el, fn }) => el.removeEventListener("click", fn));
+    handlers.length = 0;
+  }
+
+  function attachToVisible() {
+    for (const sel of SUBMIT_SELECTORS) {
+      document.querySelectorAll(sel).forEach(btn => {
+        if (!btn._otSubmitWatched && btn !== otBtn && btn.offsetParent) {
+          btn._otSubmitWatched = true;
+          const fn = () => { setTimeout(markApplied, 400); };
+          btn.addEventListener("click", fn, { once: true });
+          handlers.push({ el: btn, fn });
+        }
+      });
+    }
+  }
+
+  // Attach now and re-check as multi-step forms reveal new buttons
+  attachToVisible();
+  const obs = new MutationObserver(() => attachToVisible());
+  obs.observe(document.body, { childList: true, subtree: true });
+  // Stop watching after 10 min (user gave up or page navigated)
+  setTimeout(() => { obs.disconnect(); cleanupListeners(); }, 600_000);
 }
 
 // ── Recruiter search button (CareerOps "contacto" feature) ───────────────────

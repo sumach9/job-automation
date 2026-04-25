@@ -788,9 +788,10 @@ app.post("/api/onetouch-apply", (req, res) => {
     const job = req.body;
     if (!job?.url) return res.json({ ok: false, reason: "No URL provided" });
 
-    // Dedup
-    if (seenUrls.has(job.url)) return res.json({ ok: true, deduped: true });
-    seenUrls.add(job.url);
+    // Dedup — if URL already tracked, return the existing record id so the
+    // extension can still hook its submit button to mark it "applied"
+    const existing = applications.find(a => a.url === job.url);
+    if (existing) return res.json({ ok: true, deduped: true, id: existing.id });
 
     // Score it
     const scored = scoreJob(job);
@@ -814,12 +815,15 @@ app.post("/api/onetouch-apply", (req, res) => {
       skills:         job.skills || [],
       description:    job.description || "",
       salary:         job.salary || "",
+      matchedSkills:  job.matchedSkills || [],
+      tailoredAnswers: job.tailoredAnswers || false,
     };
 
     applications.push(record);
+    seenUrls.add(job.url);
     logScanHistory(record, "onetouch-filled");
     saveData({ applications, logs });
-    log("success", `OneTouch: ${record.title} @ ${record.company}`, `Score ${record.score}`);
+    log("success", `OneTouch filled: ${record.title} @ ${record.company}`, `Score ${record.score}`);
 
     res.json({ ok: true, id: record.id, score: record.score });
   } catch (err) {
@@ -984,8 +988,9 @@ app.patch("/api/applications/:id/stage", (req, res) => {
   if (!record) return res.status(404).json({ ok: false });
   record.status       = stage;
   record.stageUpdated = new Date().toISOString();
+  if (stage === "applied") record.appliedAt = record.appliedAt || new Date().toISOString();
   saveData({ applications, logs });
-  log("info", `Pipeline: ${record.title} → ${stage}`);
+  log("success", `Pipeline: ${record.title} @ ${record.company} → ${stage}`);
   res.json({ ok: true, record });
 });
 
