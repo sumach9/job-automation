@@ -93,9 +93,11 @@ function scrapeJobData() {
 
 // ── Profile store ─────────────────────────────────────────────────────────────
 async function getProfile() {
+  // Allow temporary override during tailored fill pass
+  if (window.__otProfileOverride) return window.__otProfileOverride;
   // sync: small fields — local: resume data (may be large)
   const sync  = await new Promise((ok) => chrome.storage.sync.get("profile", (d) => ok(d.profile || {})));
-  const local = await new Promise((ok) => chrome.storage.local.get("resumeData", (d) => ok(d)));
+  const local = await new Promise((ok) => chrome.storage.local.get(["resumeData","resumeFileName"], (d) => ok(d)));
   return { ...sync, ...local };
 }
 
@@ -121,8 +123,9 @@ function inferValue(rawLabel, profile) {
   if (l.includes("start date") || l.includes("available to start") || l.includes("earliest start")) return "2 weeks";
   if (l.includes("notice"))                                              return "2 weeks";
   if (l.includes("address") && !l.includes("email"))                    return profile.location || "";
-  if (l.includes("cover letter") || l.includes("why do you") || l.includes("motivat")) return profile.coverLetter || "";
-  if (l.includes("summary") || l.includes("about yourself") || l.includes("bio"))     return profile.summary || "";
+  if (/cover.?letter|letter of interest/i.test(l))                                   return profile.coverLetter || "";
+  if (/why (do you|are you|this role|us|our|company)|motivat|what excites|interest you/i.test(l)) return profile.whyRole || profile.coverLetter || "";
+  if (/summary|about yourself|bio|introduce/i.test(l))                               return profile.summary || "";
   if (l.includes("degree") || l.includes("education"))                  return profile.degree || "Bachelor's Degree";
   if (l.includes("university") || l.includes("school") || l.includes("college"))      return profile.school || "";
   if (l.includes("major") || l.includes("field of study"))              return profile.major || "Computer Science";
@@ -518,42 +521,92 @@ async function handleWorkday(job) {
   return totalFilled;
 }
 
+// ── Fetch tailored answers from backend (CareerOps-style) ────────────────────
+async function fetchTailoredAnswers(job, profile) {
+  try {
+    const res = await fetch(`${API_BASE}/generate-answers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job, profile }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 // ── Master apply handler ──────────────────────────────────────────────────────
 async function oneTouchApply(job) {
   if (isFillingNow) return;
   isFillingNow = true;
 
-  setButtonState("loading", "Filling form…");
-  showToast("⚡ Scanning and filling fields…", "info");
+  setButtonState("loading", "Generating answers…");
+  showToast("🧠 Tailoring answers to this role…", "info", 2000);
 
   try {
-    let filled = 0;
+    // 1. Get profile
+    const profile = await getProfile();
 
-    if (SITE === "linkedin")   filled = await handleLinkedIn(job);
+    // 2. Fetch tailored answers from backend (cover letter, why this role, etc.)
+    const tailored = await fetchTailoredAnswers(job, profile);
+
+    // Inject tailored cover letter + whyRole into profile so fillForms() uses them
+    const enrichedProfile = {
+      ...profile,
+      coverLetter: tailored?.coverLetter || profile.coverLetter || "",
+      whyRole:     tailored?.whyRole     || "",
+    };
+    // Temporarily override getProfile to return enriched version for this fill pass
+    const origGet = window.__otProfileOverride;
+    window.__otProfileOverride = enrichedProfile;
+
+    setButtonState("loading", "Filling form…");
+    showToast("⚡ Filling all fields…", "info", 2000);
+
+    let filled = 0;
+    if (SITE === "linkedin")     filled = await handleLinkedIn(job);
     else if (SITE === "workday") filled = await handleWorkday(job);
     else                         filled = await fillForms();
 
+    window.__otProfileOverride = origGet;
+
     if (filled === 0) {
-      showToast("⚠ No empty fields found — may already be filled or not visible yet", "error", 4000);
+      showToast("⚠ No empty fields found — may already be filled or not visible", "error", 4000);
       setButtonState("error", "No fields found");
       setTimeout(() => setButtonState("default", job.company || SITE), 3000);
       isFillingNow = false;
       return;
     }
 
-    showToast(`✅ ${filled} fields filled — review and click Submit`, "success", 5000);
+    // 3. Show success with score + recruiter link
+    const score    = tailored?.score ?? null;
+    const recruiterUrl = tailored?.recruiterUrl || null;
+    const matchedSkills = tailored?.matchedSkills || [];
+
+    const scoreText = score != null ? ` · ★ ${score}` : "";
+    const skillText = matchedSkills.length > 0 ? `\nMatched: ${matchedSkills.slice(0, 3).join(", ")}` : "";
+    showToast(`✅ ${filled} fields filled${scoreText}${skillText}\nReview then click Submit`, "success", 7000);
     setButtonState("success", `${filled} filled!`);
     highlightSubmitButton();
+
+    // Inject recruiter search button if score is good
+    if (recruiterUrl && (score == null || score >= 3.5)) {
+      injectRecruiterButton(recruiterUrl, job.company);
+    }
 
     // Notify badge counter
     chrome.runtime.sendMessage({ type: "JOB_APPLIED" });
 
-    // Track to dashboard
+    // Track to dashboard (include tailored data)
     try {
       await fetch(`${API_BASE}/onetouch-apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...job, filledFields: filled }),
+        body: JSON.stringify({
+          ...job,
+          filledFields: filled,
+          matchedSkills,
+          tailoredAnswers: !!tailored,
+        }),
       });
     } catch {}
 
@@ -614,6 +667,30 @@ function highlightSubmitButton() {
       }
     }
   }
+}
+
+// ── Recruiter search button (CareerOps "contacto" feature) ───────────────────
+function injectRecruiterButton(recruiterUrl, company) {
+  if (document.getElementById("onetouch-recruiter")) return;
+  const btn = document.createElement("a");
+  btn.id     = "onetouch-recruiter";
+  btn.href   = recruiterUrl;
+  btn.target = "_blank";
+  btn.rel    = "noopener";
+  btn.title  = `Find a recruiter at ${company || "this company"} on LinkedIn`;
+  btn.style.cssText = `
+    position: fixed; bottom: 104px; right: 28px; z-index: 2147483647;
+    background: #0a66c2; color: #fff; border: none; border-radius: 50px;
+    padding: 10px 18px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: none;
+    box-shadow: 0 4px 20px rgba(10,102,194,0.5);
+    display: flex; align-items: center; gap: 8px;
+    animation: otSlideIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  `;
+  btn.innerHTML = `<span>💼</span> Find Recruiter`;
+  // Auto-remove after 30s
+  setTimeout(() => btn.remove(), 30_000);
+  document.body.appendChild(btn);
 }
 
 // ── Score badge ───────────────────────────────────────────────────────────────

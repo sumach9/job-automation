@@ -50,7 +50,12 @@ chrome.storage.sync.get("profile", ({ profile }) => {
   set("f-school",   profile.school);
   const degreeStr = [profile.degree, profile.major].filter(Boolean).join(" ");
   if (degreeStr) document.getElementById("f-degree").value = degreeStr;
-  set("f-cover",    profile.coverLetter);
+  if (Array.isArray(profile.skills)) document.getElementById("f-skills").value = profile.skills.join(", ");
+  else if (profile.skills) set("f-skills", profile.skills);
+  set("f-roles",   profile.targetRoles);
+  if (profile.remotePreference) document.getElementById("f-remote").value = profile.remotePreference;
+  set("f-summary", profile.summary);
+  set("f-cover",   profile.coverLetter);
 });
 
 // Check local storage for resume (stored separately to avoid 100KB sync limit)
@@ -64,25 +69,30 @@ chrome.storage.local.get(["resumeData", "resumeFileName"], ({ resumeFileName }) 
 
 // ── Save profile ──────────────────────────────────────────────────────────────
 document.getElementById("save-btn").addEventListener("click", async () => {
-  const nameVal = document.getElementById("f-name").value.trim();
+  const nameVal   = document.getElementById("f-name").value.trim();
   const degreeVal = document.getElementById("f-degree").value.trim();
+  const skillsRaw = document.getElementById("f-skills").value.trim();
   const profile = {
-    name:           nameVal,
-    firstName:      nameVal.split(" ")[0],
-    lastName:       nameVal.split(" ").slice(-1)[0],
-    email:          document.getElementById("f-email").value.trim(),
-    phone:          document.getElementById("f-phone").value.trim(),
-    location:       document.getElementById("f-location").value.trim(),
-    linkedinUrl:    document.getElementById("f-linkedin").value.trim(),
-    github:         document.getElementById("f-github").value.trim(),
-    expectedSalary: document.getElementById("f-salary").value.trim(),
-    yearsExperience:document.getElementById("f-exp").value.trim(),
-    school:         document.getElementById("f-school").value.trim(),
-    degree:         degreeVal.split(" ")[0] || "Bachelor's",
-    major:          degreeVal.includes(" ") ? degreeVal.split(" ").slice(1).join(" ") : degreeVal,
-    coverLetter:    document.getElementById("f-cover").value.trim(),
-    zipCode:        "98101",
-    savedAt:        new Date().toISOString(),
+    name:             nameVal,
+    firstName:        nameVal.split(" ")[0],
+    lastName:         nameVal.split(" ").slice(-1)[0],
+    email:            document.getElementById("f-email").value.trim(),
+    phone:            document.getElementById("f-phone").value.trim(),
+    location:         document.getElementById("f-location").value.trim(),
+    linkedinUrl:      document.getElementById("f-linkedin").value.trim(),
+    github:           document.getElementById("f-github").value.trim(),
+    expectedSalary:   document.getElementById("f-salary").value.trim(),
+    yearsExperience:  document.getElementById("f-exp").value.trim(),
+    school:           document.getElementById("f-school").value.trim(),
+    degree:           degreeVal.split(" ")[0] || "Bachelor's",
+    major:            degreeVal.includes(" ") ? degreeVal.split(" ").slice(1).join(" ") : degreeVal,
+    skills:           skillsRaw ? skillsRaw.split(",").map(s => s.trim()).filter(Boolean) : [],
+    targetRoles:      document.getElementById("f-roles").value.trim(),
+    remotePreference: document.getElementById("f-remote").value,
+    summary:          document.getElementById("f-summary").value.trim(),
+    coverLetter:      document.getElementById("f-cover").value.trim(),
+    zipCode:          "98101",
+    savedAt:          new Date().toISOString(),
   };
 
   // Preserve resumeFileName reference in sync profile (actual data is in local storage)

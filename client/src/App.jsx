@@ -33,10 +33,20 @@ const SORT_OPTIONS = [
 
 const NAV_ITEMS = [
   { id: "dashboard",    label: "Dashboard",    icon: "📊" },
+  { id: "pipeline",     label: "Pipeline",     icon: "🔀" },
   { id: "jobs",         label: "Jobs",         icon: "💼" },
   { id: "applications", label: "Applications", icon: "📋" },
   { id: "logs",         label: "Logs",         icon: "🖥" },
   { id: "settings",     label: "Settings",     icon: "⚙️" },
+];
+
+const PIPELINE_STAGES = [
+  { key: "queued-manual",   label: "Queued",       icon: "📋", color: "#a8a29e" },
+  { key: "onetouch-filled", label: "OneTouch",     icon: "⚡", color: "#818cf8" },
+  { key: "applied",         label: "Applied",      icon: "✓",  color: "#4ade80" },
+  { key: "interviewing",    label: "Interviewing", icon: "💬", color: "#38bdf8" },
+  { key: "offered",         label: "Offered 🎉",   icon: "🏆", color: "#f59e0b" },
+  { key: "rejected",        label: "Rejected",     icon: "✕",  color: "#f87171" },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -301,6 +311,17 @@ function JobModal({ job, onClose, onApply }) {
           }}>
             Open Job Posting ↗
           </a>
+          {/* CareerOps-style "contacto" — find recruiter on LinkedIn */}
+          <a
+            href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent((job.company || "") + " recruiter talent acquisition")}&origin=GLOBAL_SEARCH_HEADER`}
+            target="_blank" rel="noreferrer"
+            style={{
+              flex: 1, minWidth: 140, textAlign: "center", padding: "11px",
+              background: "#0a66c222", color: "#0a66c2", borderRadius: 9, fontWeight: 700,
+              fontSize: 13, textDecoration: "none", border: "1px solid #0a66c240",
+            }}>
+            💼 Find Recruiter
+          </a>
           {(job.status === "easy-apply-pending" || job.status === "apply-failed" || job.status === "queued-manual") && (
             <button onClick={() => onApply(job)} style={{
               flex: 1, minWidth: 140, padding: "11px",
@@ -375,6 +396,8 @@ export default function App() {
   const [toast, setToast]                   = useState(null);
   const [selectedJob, setSelectedJob]       = useState(null);
   const [atsCompanies, setAtsCompanies]     = useState(null);
+  const [pipeline, setPipeline]             = useState({});
+  const [talkingPoints, setTalkingPoints]   = useState(null); // CareerOps-style report card
   const logsEndRef                          = useRef(null);
 
   const showToast = (msg, type = "success") => {
@@ -413,12 +436,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetchStatus(); fetchApplications(); fetchLogs(); fetchFoundJobs();
+    fetchStatus(); fetchApplications(); fetchLogs(); fetchFoundJobs(); fetchPipeline();
     const iv = setInterval(() => {
-      fetchStatus(); fetchApplications(); fetchLogs(); fetchFoundJobs(jobSearch);
+      fetchStatus(); fetchApplications(); fetchLogs(); fetchFoundJobs(jobSearch); fetchPipeline();
     }, 5000);
     return () => clearInterval(iv);
-  }, [fetchStatus, fetchApplications, fetchLogs, fetchFoundJobs, jobSearch]);
+  }, [fetchStatus, fetchApplications, fetchLogs, fetchFoundJobs, fetchPipeline, jobSearch]);
 
   useEffect(() => {
     if (tab === "logs") logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -501,6 +524,38 @@ export default function App() {
   const deleteApplication = async (id) => {
     await fetch(`${API}/applications/${id}`, { method: "DELETE" });
     setApplications((p) => p.filter((a) => a.id !== id));
+  };
+
+  const fetchPipeline = useCallback(async () => {
+    try {
+      const d = await fetch(`${API}/pipeline`).then((r) => r.json());
+      setPipeline(d.stages || {});
+    } catch {}
+  }, []);
+
+  const updateStage = async (id, stage) => {
+    try {
+      await fetch(`${API}/applications/${id}/stage`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage }),
+      });
+      // Optimistic update
+      setApplications((prev) => prev.map((a) => a.id === id ? { ...a, status: stage } : a));
+      fetchPipeline();
+      showToast(`Moved to ${stage}`);
+    } catch { showToast("Failed to update stage", "error"); }
+  };
+
+  const fetchTalkingPoints = async (job) => {
+    try {
+      const d = await fetch(`${API}/generate-answers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job }),
+      }).then((r) => r.json());
+      setTalkingPoints({ ...d, jobTitle: job.title, company: job.company });
+    } catch { showToast("Could not generate report", "error"); }
   };
 
   const platformCounts = applications.reduce((acc, a) => {
@@ -1012,6 +1067,140 @@ export default function App() {
                               ✨ Simplify
                             </a>
                           )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ══ PIPELINE KANBAN ═══════════════════════════════════════════ */}
+            {tab === "pipeline" && (
+              <div>
+                {/* Talking points report card (CareerOps-style) */}
+                {talkingPoints && (
+                  <div style={{
+                    background: "var(--surface)", borderRadius: 14, padding: 20,
+                    border: "1px solid #6366f140", marginBottom: 20, position: "relative",
+                    animation: "fadeIn .2s ease",
+                  }}>
+                    <button onClick={() => setTalkingPoints(null)} style={{
+                      position: "absolute", top: 14, right: 14,
+                      background: "var(--surface2)", border: "1px solid var(--border)",
+                      color: "var(--text-muted)", borderRadius: 6, cursor: "pointer",
+                      width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>✕</button>
+                    <div style={{ fontSize: 11, color: "var(--indigo)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+                      ⚡ Talking Points — {talkingPoints.jobTitle} @ {talkingPoints.company}
+                    </div>
+                    {talkingPoints.matchedSkills?.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 5 }}>MATCHED SKILLS</div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {talkingPoints.matchedSkills.map((s) => (
+                            <span key={s} style={{ background: "#3fb95020", color: "#3fb950", border: "1px solid #3fb95040", borderRadius: 6, padding: "2px 9px", fontSize: 11, fontWeight: 600 }}>
+                              ✓ {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {talkingPoints.talkingPoints?.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>PREP CHECKLIST</div>
+                        {talkingPoints.talkingPoints.map((tp, i) => (
+                          <div key={i} style={{ fontSize: 12, color: "var(--text-muted)", padding: "4px 0", borderBottom: "1px solid var(--border)" }}>{tp}</div>
+                        ))}
+                      </div>
+                    )}
+                    {talkingPoints.coverLetter && (
+                      <details style={{ marginTop: 8 }}>
+                        <summary style={{ fontSize: 12, color: "var(--indigo)", cursor: "pointer", fontWeight: 600 }}>View generated cover letter ▾</summary>
+                        <pre style={{
+                          marginTop: 10, background: "var(--bg)", borderRadius: 8,
+                          padding: "12px 16px", fontSize: 12, color: "var(--text-muted)",
+                          whiteSpace: "pre-wrap", lineHeight: 1.7, border: "1px solid var(--border)",
+                        }}>{talkingPoints.coverLetter}</pre>
+                      </details>
+                    )}
+                  </div>
+                )}
+
+                {/* Kanban columns */}
+                <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8, alignItems: "flex-start" }}>
+                  {PIPELINE_STAGES.map(({ key, label, icon, color }) => {
+                    const cards = pipeline[key] || [];
+                    return (
+                      <div key={key} style={{
+                        minWidth: 220, width: 220, flexShrink: 0,
+                        background: "var(--surface)", borderRadius: 12,
+                        border: `1px solid ${color}30`,
+                        display: "flex", flexDirection: "column",
+                        maxHeight: "calc(100vh - 180px)",
+                      }}>
+                        {/* Column header */}
+                        <div style={{
+                          padding: "10px 14px",
+                          borderBottom: `2px solid ${color}40`,
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: 14 }}>{icon}</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color }}>{label}</span>
+                          </div>
+                          <span style={{
+                            background: color + "22", color, borderRadius: 10,
+                            padding: "1px 7px", fontSize: 11, fontWeight: 700,
+                          }}>{cards.length}</span>
+                        </div>
+
+                        {/* Cards */}
+                        <div style={{ flex: 1, overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
+                          {cards.length === 0 && (
+                            <div style={{ color: "var(--text-dim)", fontSize: 11, textAlign: "center", padding: "12px 0" }}>
+                              No applications
+                            </div>
+                          )}
+                          {cards.map((a) => (
+                            <div key={a.id} style={{
+                              background: "var(--bg)", borderRadius: 8, padding: "10px 12px",
+                              border: "1px solid var(--border)", animation: "fadeIn .15s ease",
+                              cursor: "pointer",
+                            }}
+                              onClick={() => { setSelectedJob(a); fetchTalkingPoints(a); }}
+                            >
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 3, lineHeight: 1.3 }}>
+                                {a.title}
+                              </div>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
+                                {a.company}
+                              </div>
+                              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
+                                {a.score != null && <ScoreBadge score={a.score} />}
+                                <PlatformBadge platform={a.platform} />
+                              </div>
+                              {/* Stage advance buttons */}
+                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                                {PIPELINE_STAGES
+                                  .filter(s => s.key !== key)
+                                  .slice(0, 3)
+                                  .map((s) => (
+                                    <button key={s.key} onClick={(e) => { e.stopPropagation(); updateStage(a.id, s.key); }}
+                                      title={`Move to ${s.label}`}
+                                      style={{
+                                        background: s.color + "15", color: s.color,
+                                        border: `1px solid ${s.color}40`,
+                                        borderRadius: 5, padding: "2px 7px", fontSize: 10,
+                                        fontWeight: 600, cursor: "pointer",
+                                      }}>
+                                      → {s.label}
+                                    </button>
+                                  ))
+                                }
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     );

@@ -196,7 +196,19 @@
     <div class="field"><label>Years of Experience</label><input id="f-exp" type="text" placeholder="3"/></div>
     <div class="field"><label>School / University</label><input id="f-school" type="text" placeholder="University of Washington"/></div>
     <div class="field"><label>Degree / Major</label><input id="f-degree" type="text" placeholder="B.S. Computer Science"/></div>
-    <div class="field"><label>Cover Letter (optional)</label><textarea id="f-cover" rows="3" placeholder="I am excited to apply because…" style="resize:vertical"></textarea></div>
+    <div class="field"><label>Skills (comma-separated)</label><input id="f-skills" type="text" placeholder="Python, SQL, PyTorch, AWS"/></div>
+    <div class="field"><label>Target Roles</label><input id="f-roles" type="text" placeholder="Data Scientist, ML Engineer"/></div>
+    <div class="field"><label>Work Preference</label>
+      <select id="f-remote" style="width:100%;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:12px;">
+        <option value="">Any</option>
+        <option value="Remote">Remote</option>
+        <option value="Hybrid">Hybrid</option>
+        <option value="Remote or Hybrid">Remote or Hybrid</option>
+        <option value="On-site">On-site</option>
+      </select>
+    </div>
+    <div class="field"><label>Work Summary (2–3 sentences)</label><textarea id="f-summary" rows="3" placeholder="Senior data scientist with 4+ years building ML pipelines…" style="resize:vertical"></textarea></div>
+    <div class="field"><label>Cover Letter (optional — auto-generated if blank)</label><textarea id="f-cover" rows="3" placeholder="Leave blank to auto-generate a tailored one per job" style="resize:vertical"></textarea></div>
   </div>
 
   <div class="section">

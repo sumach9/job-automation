@@ -862,6 +862,151 @@ app.delete("/api/applications/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CareerOps-inspired: Tailored answer generation
+// POST /api/generate-answers
+// { job: { title, company, description }, profile: { name, skills, summary, ... } }
+// Returns: { coverLetter, whyRole, talkingPoints, matchedSkills }
+// No external API needed — pure template engine
+// ─────────────────────────────────────────────────────────────────────────────
+app.post("/api/generate-answers", (req, res) => {
+  try {
+    const { job = {}, profile = {} } = req.body;
+    const answers = generateTailoredAnswers(job, profile);
+    res.json({ ok: true, ...answers });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+function generateTailoredAnswers(job, profile) {
+  const {
+    title = "this role",
+    company = "your company",
+    description = "",
+  } = job;
+
+  const {
+    name = "",
+    firstName = name.split(" ")[0] || "Candidate",
+    yearsExperience = "several",
+    skills = [],
+    summary = "",
+    coverLetter: savedCoverLetter = "",
+    targetRoles = "",
+    remotePreference = "Remote or Hybrid",
+  } = profile;
+
+  const jdLower = description.toLowerCase();
+
+  // Parse skills from profile (can be array or comma-separated string)
+  const skillArr = Array.isArray(skills)
+    ? skills
+    : (skills || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+  // Find which profile skills are mentioned in the job description
+  const matchedSkills = skillArr.filter(
+    (s) => s && jdLower.includes(s.toLowerCase())
+  );
+
+  // Extract key requirements from JD (sentences containing "experience", "required", "must", "knowledge")
+  const reqSentences = description
+    .split(/[.\n]/)
+    .filter((s) => /experience|required|must|profici|knowledge|familiar/i.test(s))
+    .slice(0, 5)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Build cover letter
+  let coverLetter = savedCoverLetter;
+  if (!coverLetter) {
+    const skillLine = matchedSkills.length > 0
+      ? `My hands-on experience with ${matchedSkills.slice(0, 3).join(", ")} aligns directly with your requirements.`
+      : `My ${yearsExperience} years of experience makes me a strong candidate.`;
+
+    const summaryLine = summary
+      ? summary.trim().replace(/\.$/, "") + "."
+      : `I have ${yearsExperience} years of experience in this field and a track record of delivering measurable results.`;
+
+    coverLetter =
+`Dear Hiring Team at ${company},
+
+I'm excited to apply for the ${title} position. ${skillLine}
+
+${summaryLine} I'm drawn to ${company} because of the opportunity to work on meaningful challenges in a high-impact role.
+
+I would love the chance to discuss how my background aligns with ${company}'s goals.
+
+Best regards,
+${name || firstName}`;
+  }
+
+  // One-liner "why this role" answer
+  const whyRole = matchedSkills.length > 0
+    ? `I'm excited about the ${title} role because my experience with ${matchedSkills.slice(0, 2).join(" and ")} is a strong match. ${summary ? summary.split(".")[0] + "." : ""}`
+    : `The ${title} role at ${company} aligns perfectly with my career direction. ${summary ? summary.split(".")[0] + "." : ""}`;
+
+  // Recruiter LinkedIn search URL (CareerOps-style "contacto" feature)
+  const recruiterUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(company + " recruiter talent " + title)}&origin=GLOBAL_SEARCH_HEADER`;
+
+  // Talking points for interview prep
+  const talkingPoints = [
+    matchedSkills.length > 0
+      ? `✅ Highlight your experience with: ${matchedSkills.join(", ")}`
+      : `📌 Emphasise your ${yearsExperience} years of relevant experience`,
+    reqSentences.length > 0
+      ? `📋 Address this requirement: "${reqSentences[0].slice(0, 80)}…"`
+      : `📋 Research ${company}'s recent products and engineering blog`,
+    `🎯 Prepare 2–3 STAR stories (Situation, Task, Action, Result)`,
+    `🔍 Review ${company}'s mission, values, and recent news before the interview`,
+    remotePreference ? `🏠 You prefer: ${remotePreference} — confirm arrangement early` : null,
+  ].filter(Boolean);
+
+  return {
+    coverLetter,
+    whyRole,
+    talkingPoints,
+    matchedSkills,
+    recruiterUrl,
+    reqSentences,
+  };
+}
+
+// ─── Pipeline stage management ───────────────────────────────────────────────
+// PATCH /api/applications/:id/stage  { stage: "interviewing" | "offered" | "rejected" | "applied" }
+const VALID_STAGES = ["applied", "interviewing", "offered", "rejected", "onetouch-filled", "queued-manual"];
+
+app.patch("/api/applications/:id/stage", (req, res) => {
+  const id  = parseFloat(req.params.id);
+  const { stage } = req.body;
+  if (!VALID_STAGES.includes(stage)) return res.status(400).json({ ok: false, message: "Invalid stage" });
+  const record = applications.find((a) => a.id === id);
+  if (!record) return res.status(404).json({ ok: false });
+  record.status       = stage;
+  record.stageUpdated = new Date().toISOString();
+  saveData({ applications, logs });
+  log("info", `Pipeline: ${record.title} → ${stage}`);
+  res.json({ ok: true, record });
+});
+
+// GET /api/pipeline — returns applications grouped by stage
+app.get("/api/pipeline", (req, res) => {
+  const stages = {
+    "queued-manual":   [],
+    "onetouch-filled": [],
+    "applied":         [],
+    "interviewing":    [],
+    "offered":         [],
+    "rejected":        [],
+    "other":           [],
+  };
+  for (const a of applications) {
+    const key = stages[a.status] ? a.status : "other";
+    stages[key].push(a);
+  }
+  res.json({ stages });
+});
+
 app.get("*", (req, res) => {
   const index = path.join(clientBuild, "index.html");
   if (fs.existsSync(index)) return res.sendFile(index);
