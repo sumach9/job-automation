@@ -431,6 +431,14 @@ export default function App() {
     } catch {}
   }, []);
 
+  // ── Must be defined BEFORE the useEffect that depends on it ──
+  const fetchPipeline = useCallback(async () => {
+    try {
+      const d = await fetch(`${API}/pipeline`).then((r) => r.json());
+      setPipeline(d.stages || {});
+    } catch {}
+  }, []);
+
   useEffect(() => {
     fetch(`${API}/ats-companies`).then((r) => r.json()).then(setAtsCompanies).catch(() => {});
   }, []);
@@ -525,13 +533,6 @@ export default function App() {
     await fetch(`${API}/applications/${id}`, { method: "DELETE" });
     setApplications((p) => p.filter((a) => a.id !== id));
   };
-
-  const fetchPipeline = useCallback(async () => {
-    try {
-      const d = await fetch(`${API}/pipeline`).then((r) => r.json());
-      setPipeline(d.stages || {});
-    } catch {}
-  }, []);
 
   const updateStage = async (id, stage) => {
     try {
