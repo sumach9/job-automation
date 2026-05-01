@@ -35,7 +35,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "SAVE_PROFILE") {
-    chrome.storage.sync.set({ profile: msg.profile }, () => sendResponse({ ok: true }));
+    chrome.storage.sync.set({ profile: msg.profile }, () => {
+      // Also sync profile to the dashboard server so scoring uses the real profile
+      fetch(`${API_BASE}/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(msg.profile),
+      }).catch(() => {});
+      sendResponse({ ok: true });
+    });
     return true;
   }
 

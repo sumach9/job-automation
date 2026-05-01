@@ -53,12 +53,11 @@ const { applications, logs, foundJobs = [] } = loadData();
 
 const settings = {
   jobTitles: (process.env.JOB_TITLES || "Data Scientist,Data Engineer").split(",").map((s) => s.trim()),
-  locations: (process.env.JOB_LOCATIONS || "Seattle,Washington").split(",").map((s) => s.trim()),
+  locations: (process.env.JOB_LOCATIONS || "Remote,United States").split(",").map((s) => s.trim()),
   intervalMinutes: parseInt(process.env.INTERVAL_MINUTES || "5", 10),
   maxApplicationsPerRun: parseInt(process.env.MAX_APPS_PER_RUN || "10", 10),
   maxBrowserOpensPerCycle: parseInt(process.env.MAX_BROWSER_OPENS || "5", 10),
   emailNotifications: process.env.EMAIL_NOTIFICATIONS === "true",
-  // Which platforms to scrape (all enabled by default)
   platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true },
   autoApplyEnabled: process.env.AUTO_APPLY_ENABLED === "true",
   apifyToken: process.env.APIFY_TOKEN || "",
@@ -66,21 +65,34 @@ const settings = {
   emailUser: process.env.EMAIL_USER || "",
   emailPass: process.env.EMAIL_PASS || "",
   notifyEmail: process.env.NOTIFY_EMAIL || "",
-  // LinkedIn credentials for Easy Apply
   linkedinEmail: process.env.LINKEDIN_EMAIL || "",
   linkedinPassword: process.env.LINKEDIN_PASSWORD || "",
-  // Simplify integration
   simplifyMode: process.env.SIMPLIFY_MODE || "shell",
   simplifyAutoSubmit: process.env.SIMPLIFY_AUTO_SUBMIT === "true",
-  // Applicant profile
+  // Applicant profile — populated from extension popup via POST /api/profile
   profile: {
+    name: process.env.APPLICANT_NAME || "",
+    firstName: "",
+    lastName: "",
+    email: process.env.APPLICANT_EMAIL || "",
     phone: process.env.APPLICANT_PHONE || "",
-    location: process.env.APPLICANT_LOCATION || "Seattle, WA",
+    location: process.env.APPLICANT_LOCATION || "",
     linkedinUrl: process.env.APPLICANT_LINKEDIN_URL || "",
+    github: process.env.APPLICANT_GITHUB || "",
     website: process.env.APPLICANT_WEBSITE || "",
-    yearsExperience: process.env.APPLICANT_YEARS_EXPERIENCE || "3",
+    school: process.env.APPLICANT_SCHOOL || "",
+    degree: process.env.APPLICANT_DEGREE || "",
+    major: process.env.APPLICANT_MAJOR || "",
+    yearsExperience: process.env.APPLICANT_YEARS_EXPERIENCE || "",
     expectedSalary: process.env.APPLICANT_EXPECTED_SALARY || "",
+    skills: [],          // array — set from popup
+    targetRoles: process.env.JOB_TITLES || "",
+    remotePreference: "",
+    summary: "",
+    coverLetter: "",
     resumePath: process.env.RESUME_PATH || "",
+    resumeFileName: "",
+    savedAt: null,
   },
 };
 
@@ -517,8 +529,13 @@ function saveFoundJob(job) {
     return false;
   }
 
-  // Score the job against Suma's profile
-  const { score, breakdown } = scoreJob(job);
+  // Score the job against the user's profile
+  const { score, breakdown } = scoreJob(job, {
+    skills: settings.profile.skills,
+    preferredLocations: settings.locations,
+    yearsExperience: settings.profile.yearsExperience,
+    targetRoles: settings.profile.targetRoles,
+  });
   job.score = score;
   job.scoreBreakdown = breakdown;
   job.scoreLabel = scoreLabel(score);
@@ -639,7 +656,8 @@ function stopScheduler() {
 // ─── API routes ───────────────────────────────────────────────────────────────
 
 app.get("/api/status", (req, res) => {
-  res.json({ isRunning, stats, settings: sanitizeSettings(settings) });
+  const hotMatches = foundJobs.filter(j => j.score >= 3.5).length;
+  res.json({ isRunning, stats: { ...stats, hotMatches }, settings: sanitizeSettings(settings) });
 });
 
 app.post("/api/start", (req, res) => {
@@ -693,6 +711,153 @@ app.post("/api/settings", (req, res) => {
   if (isRunning) { stopScheduler(); startScheduler(); }
   log("info", "Settings updated");
   res.json({ ok: true, settings: sanitizeSettings(settings) });
+});
+
+// GET /api/profile — return the current user profile
+app.get("/api/profile", (req, res) => {
+  res.json({ ok: true, profile: settings.profile });
+});
+
+// POST /api/profile — save profile from extension popup (any user)
+app.post("/api/profile", (req, res) => {
+  const p = req.body || {};
+  // Merge all profile fields
+  const fields = ["name","firstName","lastName","email","phone","location",
+    "linkedinUrl","github","website","school","degree","major",
+    "yearsExperience","expectedSalary","skills","targetRoles",
+    "remotePreference","summary","coverLetter","resumePath","resumeFileName","zipCode"];
+  for (const f of fields) {
+    if (p[f] !== undefined) settings.profile[f] = p[f];
+  }
+  settings.profile.savedAt = new Date().toISOString();
+  // Sync job titles from targetRoles if user set them
+  if (p.targetRoles) {
+    const roles = p.targetRoles.split(",").map(s => s.trim()).filter(Boolean);
+    if (roles.length > 0) settings.jobTitles = roles;
+  }
+  log("info", `Profile saved — ${settings.profile.name || "unnamed user"}`);
+  res.json({ ok: true, profile: settings.profile });
+});
+
+// POST /api/generate-resume — tailored resume sections for a job
+app.post("/api/generate-resume", (req, res) => {
+  try {
+    const { job = {}, profile = {} } = req.body;
+    // Merge with stored profile as fallback
+    const p = { ...settings.profile, ...profile };
+    const resume = generateTailoredResume(job, p);
+    res.json({ ok: true, ...resume });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+function generateTailoredResume(job, profile) {
+  const title       = job.title || "this role";
+  const company     = job.company || "the company";
+  const description = (job.description || "").toLowerCase();
+
+  const name           = profile.name || "Your Name";
+  const email          = profile.email || "";
+  const phone          = profile.phone || "";
+  const location       = profile.location || "";
+  const linkedinUrl    = profile.linkedinUrl || "";
+  const github         = profile.github || "";
+  const school         = profile.school || "";
+  const degree         = [profile.degree, profile.major].filter(Boolean).join(" in ") || "Bachelor's Degree";
+  const yrsExp         = parseInt(profile.yearsExperience, 10) || 0;
+  const summary        = profile.summary || "";
+  const remotePreference = profile.remotePreference || "Remote or Hybrid";
+
+  const skillArr = Array.isArray(profile.skills)
+    ? profile.skills
+    : (profile.skills || "").split(",").map(s => s.trim()).filter(Boolean);
+
+  // Skills that appear in the job description — put first
+  const matchedSkills = skillArr.filter(s => description.includes(s.toLowerCase()));
+  const otherSkills   = skillArr.filter(s => !description.includes(s.toLowerCase()));
+  const orderedSkills = [...matchedSkills, ...otherSkills];
+
+  // Extract key tech keywords from JD for skills section
+  const jdKeywords = (job.description || "")
+    .match(/\b(Python|SQL|Java|Scala|R\b|Go|TypeScript|JavaScript|C\+\+|Rust|Ruby|Kotlin|Swift|AWS|Azure|GCP|Docker|Kubernetes|Spark|Kafka|Airflow|dbt|Terraform|PyTorch|TensorFlow|scikit-learn|pandas|NumPy|React|Node\.js|FastAPI|Flask|Django|PostgreSQL|MySQL|MongoDB|Redis|Snowflake|Databricks|Tableau|Power BI|Looker|LLM|RAG|langchain|MLflow|SageMaker|Vertex AI|git|GitHub|REST|GraphQL|Agile|Scrum)\b/g)
+    || [];
+  const jdUniqueKeywords = [...new Set(jdKeywords.map(k => k))];
+  const missingSkills = jdUniqueKeywords.filter(k => !skillArr.some(s => s.toLowerCase() === k.toLowerCase()));
+
+  // Experience-matched seniority label
+  const seniorityLabel = yrsExp >= 7 ? "Senior" : yrsExp >= 4 ? "Mid-level" : yrsExp >= 1 ? "Junior" : "";
+
+  // Generate tailored summary
+  const tailoredSummary = summary ||
+    `${seniorityLabel ? seniorityLabel + " " : ""}professional with ${yrsExp > 0 ? yrsExp + "+ years" : "proven"} of experience. ` +
+    (matchedSkills.length > 0 ? `Strong background in ${matchedSkills.slice(0, 4).join(", ")}. ` : "") +
+    `Seeking a ${remotePreference.toLowerCase()} ${title} role.`;
+
+  // Generate experience bullet points tailored to JD
+  const bulletTemplates = [
+    matchedSkills[0] ? `Built and deployed production ${matchedSkills[0]} solutions that improved performance by 30%` : null,
+    matchedSkills[1] ? `Developed end-to-end pipelines using ${matchedSkills[1]} and ${matchedSkills[2] || "cloud infrastructure"}` : null,
+    `Led cross-functional collaboration to deliver data-driven insights that reduced decision time by 25%`,
+    matchedSkills[0] ? `Optimised ${matchedSkills[0]} workflows, cutting processing time by 40% at scale` : null,
+    `Mentored team members and contributed to technical documentation and best practices`,
+    `Delivered ${yrsExp > 0 ? yrsExp : "multiple"} major projects end-to-end — from requirements through production deployment`,
+  ].filter(Boolean);
+
+  return {
+    name, email, phone, location, linkedinUrl, github,
+    education: { school, degree },
+    tailoredSummary,
+    matchedSkills,
+    otherSkills,
+    missingSkills,           // skills in JD not in profile — "skill gap"
+    orderedSkills,
+    experienceBullets: bulletTemplates,
+    seniority: seniorityLabel,
+    yearsExperience: yrsExp,
+    targetTitle: title,
+    targetCompany: company,
+  };
+}
+
+// POST /api/skill-gap — quick skill gap analysis for a job
+app.post("/api/skill-gap", (req, res) => {
+  try {
+    const { job = {}, profile = {} } = req.body;
+    const p = { ...settings.profile, ...profile };
+    const description = (job.description || "").toLowerCase();
+
+    const skillArr = Array.isArray(p.skills)
+      ? p.skills
+      : (p.skills || "").split(",").map(s => s.trim()).filter(Boolean);
+
+    const matched = skillArr.filter(s => s && description.includes(s.toLowerCase()));
+    const missing = [];
+
+    // Extract tech keywords from JD the user doesn't have
+    const jdKeywords = (job.description || "")
+      .match(/\b(Python|SQL|Java|Scala|Go|TypeScript|JavaScript|AWS|Azure|GCP|Docker|Kubernetes|Spark|Kafka|Airflow|dbt|PyTorch|TensorFlow|scikit-learn|pandas|React|FastAPI|PostgreSQL|MongoDB|Snowflake|Databricks|Tableau|LLM|RAG|MLflow|SageMaker|Terraform|Kubernetes|Rust|GraphQL)\b/g)
+      || [];
+    const unique = [...new Set(jdKeywords)];
+    for (const kw of unique) {
+      if (!skillArr.some(s => s.toLowerCase() === kw.toLowerCase())) {
+        missing.push(kw);
+      }
+    }
+
+    const total = Math.max(skillArr.length, 1);
+    const matchPct = Math.round((matched.length / total) * 100);
+
+    // Experience check
+    const expMatch = (job.description || "").match(/(\d+)\s*\+?\s*years?\s+of\s+experience/i);
+    const reqYears = expMatch ? parseInt(expMatch[1], 10) : null;
+    const userYears = parseInt(p.yearsExperience, 10) || 0;
+    const expGap = reqYears !== null ? { required: reqYears, you: userYears, ok: userYears >= reqYears - 1 } : null;
+
+    res.json({ ok: true, matched, missing, matchPct, expGap, total: skillArr.length });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 app.post("/api/test-email", async (req, res) => {
@@ -793,8 +958,13 @@ app.post("/api/onetouch-apply", (req, res) => {
     const existing = applications.find(a => a.url === job.url);
     if (existing) return res.json({ ok: true, deduped: true, id: existing.id });
 
-    // Score it
-    const scored = scoreJob(job);
+    // Score it against the user's profile
+    const scored = scoreJob(job, {
+      skills: settings.profile.skills,
+      preferredLocations: settings.locations,
+      yearsExperience: settings.profile.yearsExperience,
+      targetRoles: settings.profile.targetRoles,
+    });
     const record = {
       id:             Date.now() + Math.random(),
       title:          job.title || "Unknown",

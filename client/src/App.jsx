@@ -47,11 +47,21 @@ const NAV = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function scoreColor(s) {
-  if (s >= 4.0) return "#22c55e";
-  if (s >= 3.0) return "#84cc16";
-  if (s >= 2.0) return "#f59e0b";
+  if (s >= 3.5) return "#22c55e";
+  if (s >= 2.5) return "#84cc16";
+  if (s >= 1.5) return "#f59e0b";
   if (s >= 1.0) return "#f97316";
   return "#ef4444";
+}
+
+function profileCompleteness(profile) {
+  if (!profile) return 0;
+  const fields = ["name","email","phone","location","skills","yearsExperience","summary","targetRoles","school"];
+  const filled = fields.filter(f => {
+    const v = profile[f];
+    return Array.isArray(v) ? v.length > 0 : !!v;
+  });
+  return Math.round((filled.length / fields.length) * 100);
 }
 
 function companyColor(name = "") {
@@ -258,7 +268,7 @@ function HotJobCard({ job, onClick }) {
 // ─── Full Job Card (Jobs tab) ─────────────────────────────────────────────────
 function JobCard({ job, onDetails, onCopy, copiedId }) {
   const c = companyColor(job.company);
-  const bColor = job.score >= 4 ? "#22c55e" : job.score >= 3 ? "#84cc16" : "var(--border)";
+  const bColor = job.score >= 3.5 ? "#22c55e" : job.score >= 2.5 ? "#84cc16" : "var(--border)";
   return (
     <div style={{
       background:"var(--surface)", border:"1px solid var(--border)",
@@ -345,124 +355,306 @@ function JobCard({ job, onDetails, onCopy, copiedId }) {
 
 // ─── Job Detail Modal ─────────────────────────────────────────────────────────
 function JobModal({ job, onClose, onApply }) {
+  const [skillGap, setSkillGap]       = useState(null);
+  const [resume, setResume]           = useState(null);
+  const [loadingGap, setLoadingGap]   = useState(false);
+  const [loadingResume, setLoadingResume] = useState(false);
+  const [activeTab, setActiveTab]     = useState("overview"); // overview | gap | resume
+
+  useEffect(() => {
+    if (!job) return;
+    setSkillGap(null); setResume(null); setActiveTab("overview");
+  }, [job]);
+
   if (!job) return null;
   const c = companyColor(job.company);
+
+  async function loadSkillGap() {
+    setLoadingGap(true); setActiveTab("gap");
+    try {
+      const d = await fetch(`${API}/skill-gap`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ job }),
+      }).then(r => r.json());
+      setSkillGap(d);
+    } catch {}
+    setLoadingGap(false);
+  }
+
+  async function loadResume() {
+    setLoadingResume(true); setActiveTab("resume");
+    try {
+      const d = await fetch(`${API}/generate-resume`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ job }),
+      }).then(r => r.json());
+      setResume(d);
+    } catch {}
+    setLoadingResume(false);
+  }
+
+  const modalTabs = [
+    { id:"overview", label:"Overview" },
+    { id:"gap",      label:"Skill Gap" },
+    { id:"resume",   label:"Resume Draft" },
+  ];
+
   return (
     <div onClick={onClose} style={{
       position:"fixed", inset:0, background:"rgba(0,0,0,.75)", backdropFilter:"blur(4px)",
       display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20,
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background:"var(--surface)", borderRadius:20, width:"100%", maxWidth:720,
-        maxHeight:"90vh", overflowY:"auto", border:"1px solid var(--border)",
+        background:"var(--surface)", borderRadius:20, width:"100%", maxWidth:760,
+        maxHeight:"92vh", overflowY:"auto", border:"1px solid var(--border)",
         boxShadow:"0 32px 80px rgba(0,0,0,.7)",
       }}>
         {/* Header band */}
-        <div style={{ background:`linear-gradient(135deg, ${c}20, transparent)`, padding:"28px 28px 20px", borderBottom:"1px solid var(--border)" }}>
+        <div style={{ background:`linear-gradient(135deg, ${c}20, transparent)`, padding:"24px 28px 18px", borderBottom:"1px solid var(--border)" }}>
           <div style={{ display:"flex", gap:16, alignItems:"flex-start" }}>
-            <Avatar name={job.company} size={56}/>
-            <div style={{ flex:1 }}>
-              <h2 style={{ fontSize:20, fontWeight:800, color:"var(--text)", marginBottom:4 }}>{job.title}</h2>
-              <div style={{ fontSize:14, color:"var(--text-muted)" }}>{job.company}
+            <Avatar name={job.company} size={54}/>
+            <div style={{ flex:1, minWidth:0 }}>
+              <h2 style={{ fontSize:19, fontWeight:800, color:"var(--text)", marginBottom:4, lineHeight:1.3 }}>{job.title}</h2>
+              <div style={{ fontSize:13, color:"var(--text-muted)" }}>{job.company}
                 {job.location && <> · <span style={{ color:"#f97316" }}>📍 {job.location}</span></>}
               </div>
             </div>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <ScoreRing score={job.score} size={56}/>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <ScoreRing score={job.score} size={52}/>
               <button onClick={onClose} style={{
                 background:"var(--surface2)", border:"1px solid var(--border)", color:"var(--text-dim)",
-                borderRadius:8, width:32, height:32, cursor:"pointer", fontSize:14, display:"flex",
-                alignItems:"center", justifyContent:"center",
+                borderRadius:8, width:32, height:32, cursor:"pointer", fontSize:14,
               }}>✕</button>
             </div>
           </div>
-
-          {/* Tags row */}
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:14 }}>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:12 }}>
             <PlatformTag platform={job.platform}/>
             {job.atsProvider && <Tag color="#a855f7">{job.atsProvider}</Tag>}
             {job.status && <StatusPill status={job.status}/>}
-            {job.workMode && <Tag color="#8b5cf6">{job.workMode}</Tag>}
-            {job.jobType && <Tag color="#06b6d4">{job.jobType}</Tag>}
             {job.salary && <Tag color="#22c55e">💰 {job.salary}</Tag>}
             {job.easyApply && <Tag color="#22c55e">⚡ Easy Apply</Tag>}
           </div>
         </div>
 
+        {/* Action bar */}
+        <div style={{ display:"flex", gap:8, padding:"12px 28px", borderBottom:"1px solid var(--border)", background:"var(--surface2)", flexWrap:"wrap" }}>
+          <a href={job.url} target="_blank" rel="noreferrer" style={{
+            padding:"8px 16px", background:c, color:"#fff", borderRadius:8,
+            fontWeight:700, fontSize:12, textDecoration:"none",
+          }}>Open Job ↗</a>
+          <a href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent((job.company||"")+" recruiter talent acquisition")}`}
+            target="_blank" rel="noreferrer" style={{
+            padding:"8px 16px", background:"#0a66c220", color:"#0a66c2", borderRadius:8,
+            fontWeight:700, fontSize:12, textDecoration:"none", border:"1px solid #0a66c240",
+          }}>💼 Find Recruiter</a>
+          <button onClick={loadSkillGap} style={{
+            padding:"8px 16px", background:"#f59e0b20", color:"#f59e0b", border:"1px solid #f59e0b40",
+            borderRadius:8, fontWeight:700, fontSize:12, cursor:"pointer",
+          }}>🎯 Skill Gap</button>
+          <button onClick={loadResume} style={{
+            padding:"8px 16px", background:"#22c55e20", color:"#22c55e", border:"1px solid #22c55e40",
+            borderRadius:8, fontWeight:700, fontSize:12, cursor:"pointer",
+          }}>📄 Generate Resume</button>
+          {(job.status==="easy-apply-pending"||job.status==="apply-failed"||job.status==="queued-manual") && (
+            <button onClick={() => onApply(job)} style={{
+              padding:"8px 16px", background:"#6366f1", color:"#fff", border:"none",
+              borderRadius:8, fontWeight:700, fontSize:12, cursor:"pointer",
+            }}>⚡ Auto-Apply</button>
+          )}
+        </div>
+
+        {/* Inner tabs */}
+        <div style={{ display:"flex", gap:0, borderBottom:"1px solid var(--border)" }}>
+          {modalTabs.map(t => (
+            <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
+              padding:"10px 20px", background:"none", border:"none", borderBottom: activeTab===t.id ? "2px solid #6366f1" : "2px solid transparent",
+              color: activeTab===t.id ? "#818cf8" : "var(--text-dim)", fontWeight:activeTab===t.id?700:400,
+              fontSize:12, cursor:"pointer",
+            }}>{t.label}</button>
+          ))}
+        </div>
+
         <div style={{ padding:"20px 28px", display:"flex", flexDirection:"column", gap:18 }}>
-          {/* Score breakdown */}
-          {job.scoreBreakdown && (
-            <div style={{ background:"var(--bg)", borderRadius:12, padding:"14px 16px", border:"1px solid var(--border)" }}>
-              <div style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>Match Breakdown</div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 }}>
-                {[["Title Match",job.scoreBreakdown.title],["Skills",job.scoreBreakdown.skills?.toFixed(1)],["Location",job.scoreBreakdown.location]].map(([k,v]) => (
-                  <div key={k} style={{ background:"var(--surface)", borderRadius:8, padding:"10px 12px", textAlign:"center" }}>
-                    <div style={{ fontSize:10, color:"var(--text-dim)", marginBottom:4 }}>{k}</div>
-                    <div style={{ fontSize:22, fontWeight:800, color:scoreColor(job.score) }}>{v ?? "—"}</div>
+
+          {/* OVERVIEW TAB */}
+          {activeTab === "overview" && <>
+            {job.scoreBreakdown && (
+              <div style={{ background:"var(--bg)", borderRadius:12, padding:"14px 16px", border:"1px solid var(--border)" }}>
+                <div style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>Fit Breakdown</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10 }}>
+                  {[
+                    ["Title",    job.scoreBreakdown.title, "/2"],
+                    ["Skills",   job.scoreBreakdown.skills?.toFixed(1), "/2"],
+                    ["Location", job.scoreBreakdown.location, "/1"],
+                    ["Exp",      job.scoreBreakdown.experienceBonus?.toFixed(1), "+"],
+                  ].map(([k,v,max]) => (
+                    <div key={k} style={{ background:"var(--surface)", borderRadius:8, padding:"10px 12px", textAlign:"center" }}>
+                      <div style={{ fontSize:10, color:"var(--text-dim)", marginBottom:4 }}>{k}</div>
+                      <div style={{ fontSize:20, fontWeight:800, color:scoreColor(job.score) }}>{v ?? "—"}</div>
+                      <div style={{ fontSize:10, color:"var(--text-dim)" }}>{max}</div>
+                    </div>
+                  ))}
+                </div>
+                {job.scoreBreakdown.matchedSkills?.length > 0 && (
+                  <div style={{ marginTop:10, fontSize:12, color:"var(--text-dim)" }}>
+                    ✅ You have: <span style={{ color:"#22c55e" }}>{job.scoreBreakdown.matchedSkills.join(", ")}</span>
                   </div>
-                ))}
+                )}
               </div>
-              {job.scoreBreakdown.matchedSkills?.length > 0 && (
-                <div style={{ marginTop:10, fontSize:12, color:"var(--text-dim)" }}>
-                  Matched: <span style={{ color:"var(--text-muted)" }}>{job.scoreBreakdown.matchedSkills.join(", ")}</span>
+            )}
+            {job.skills?.length > 0 && (
+              <div>
+                <div style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Required Skills</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                  {job.skills.map((s,i) => (
+                    <span key={i} style={{ background:"#6366f112", color:"#818cf8", border:"1px solid #6366f130", borderRadius:6, padding:"3px 10px", fontSize:12 }}>{s}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {job.description && (
+              <div>
+                <div style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Description</div>
+                <div style={{ background:"var(--bg)", borderRadius:10, padding:"14px 16px", border:"1px solid var(--border)", fontSize:13, color:"var(--text-muted)", lineHeight:1.75, whiteSpace:"pre-wrap", maxHeight:220, overflowY:"auto" }}>
+                  {job.description}
+                </div>
+              </div>
+            )}
+            {job.autoApplyNote && (
+              <div style={{ fontSize:12, color:"var(--text-dim)", background:"var(--bg)", borderRadius:8, padding:"10px 14px", border:"1px solid var(--border)" }}>
+                Note: {job.autoApplyNote}
+              </div>
+            )}
+          </>}
+
+          {/* SKILL GAP TAB */}
+          {activeTab === "gap" && (
+            <div>
+              {loadingGap && <div style={{ textAlign:"center", color:"var(--text-dim)", padding:40 }}>Analysing skill gap…</div>}
+              {!loadingGap && !skillGap && (
+                <div style={{ textAlign:"center", padding:40 }}>
+                  <button onClick={loadSkillGap} style={{ padding:"12px 28px", background:"#f59e0b", color:"#000", border:"none", borderRadius:10, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+                    🎯 Run Skill Gap Analysis
+                  </button>
+                  <p style={{ color:"var(--text-dim)", fontSize:13, marginTop:12 }}>Compares your profile skills against this job's requirements</p>
+                </div>
+              )}
+              {skillGap && (
+                <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+                  {/* Match meter */}
+                  <div style={{ background:"var(--bg)", borderRadius:12, padding:"16px 20px", border:"1px solid var(--border)" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                      <span style={{ fontSize:13, fontWeight:700, color:"var(--text)" }}>Skill Match</span>
+                      <span style={{ fontSize:22, fontWeight:800, color: skillGap.matchPct >= 70 ? "#22c55e" : skillGap.matchPct >= 40 ? "#f59e0b" : "#ef4444" }}>{skillGap.matchPct}%</span>
+                    </div>
+                    <div style={{ height:8, background:"var(--border)", borderRadius:8, overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:`${skillGap.matchPct}%`, background: skillGap.matchPct >= 70 ? "#22c55e" : skillGap.matchPct >= 40 ? "#f59e0b" : "#ef4444", borderRadius:8, transition:"width .6s" }}/>
+                    </div>
+                    <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:6 }}>
+                      {skillGap.matched?.length || 0} of {skillGap.total} your skills match this job
+                    </div>
+                  </div>
+                  {/* Experience check */}
+                  {skillGap.expGap && (
+                    <div style={{ background: skillGap.expGap.ok ? "#22c55e10" : "#ef444410", borderRadius:10, padding:"12px 16px", border:`1px solid ${skillGap.expGap.ok ? "#22c55e30" : "#ef444430"}` }}>
+                      <span style={{ fontSize:13, fontWeight:700, color: skillGap.expGap.ok ? "#22c55e" : "#ef4444" }}>
+                        {skillGap.expGap.ok ? "✅" : "⚠"} Experience: {skillGap.expGap.you} yrs you · {skillGap.expGap.required}+ yrs required
+                      </span>
+                    </div>
+                  )}
+                  {/* You have */}
+                  {skillGap.matched?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize:11, color:"#22c55e", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>✅ You Have ({skillGap.matched.length})</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                        {skillGap.matched.map((s,i) => <span key={i} style={{ background:"#22c55e15", color:"#22c55e", border:"1px solid #22c55e30", borderRadius:6, padding:"3px 10px", fontSize:12 }}>{s}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {/* Missing */}
+                  {skillGap.missing?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize:11, color:"#ef4444", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>🎯 Gap — Learn These ({skillGap.missing.length})</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                        {skillGap.missing.map((s,i) => <span key={i} style={{ background:"#ef444415", color:"#f87171", border:"1px solid #ef444430", borderRadius:6, padding:"3px 10px", fontSize:12 }}>{s}</span>)}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          {/* Skills */}
-          {job.skills?.length > 0 && (
+          {/* RESUME DRAFT TAB */}
+          {activeTab === "resume" && (
             <div>
-              <div style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Skills Required</div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                {job.skills.map((s,i) => (
-                  <span key={i} style={{
-                    background:"#6366f112", color:"#818cf8", border:"1px solid #6366f130",
-                    borderRadius:6, padding:"3px 10px", fontSize:12,
-                  }}>{s}</span>
-                ))}
-              </div>
+              {loadingResume && <div style={{ textAlign:"center", color:"var(--text-dim)", padding:40 }}>Generating tailored resume…</div>}
+              {!loadingResume && !resume && (
+                <div style={{ textAlign:"center", padding:40 }}>
+                  <button onClick={loadResume} style={{ padding:"12px 28px", background:"#22c55e", color:"#000", border:"none", borderRadius:10, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+                    📄 Generate Tailored Resume
+                  </button>
+                  <p style={{ color:"var(--text-dim)", fontSize:13, marginTop:12 }}>Creates resume sections prioritising skills this job needs based on your profile</p>
+                </div>
+              )}
+              {resume && (
+                <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+                  {/* Header preview */}
+                  <div style={{ background:"var(--bg)", borderRadius:12, padding:"16px 20px", border:"1px solid var(--border)" }}>
+                    <div style={{ fontSize:18, fontWeight:800, color:"var(--text)" }}>{resume.name || "Your Name"}</div>
+                    <div style={{ fontSize:12, color:"var(--text-dim)", marginTop:4 }}>
+                      {[resume.email, resume.phone, resume.location, resume.linkedinUrl].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  {/* Summary */}
+                  {resume.tailoredSummary && (
+                    <div style={{ background:"var(--bg)", borderRadius:12, padding:"14px 16px", border:"1px solid var(--border)" }}>
+                      <div style={{ fontSize:11, color:"#6366f1", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Summary — Tailored to {resume.targetTitle}</div>
+                      <div style={{ fontSize:13, color:"var(--text-muted)", lineHeight:1.7 }}>{resume.tailoredSummary}</div>
+                    </div>
+                  )}
+                  {/* Skills — matched first */}
+                  {resume.orderedSkills?.length > 0 && (
+                    <div style={{ background:"var(--bg)", borderRadius:12, padding:"14px 16px", border:"1px solid var(--border)" }}>
+                      <div style={{ fontSize:11, color:"#6366f1", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>Skills (job matches first)</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                        {resume.matchedSkills?.map((s,i) => <span key={i} style={{ background:"#22c55e15", color:"#22c55e", border:"1px solid #22c55e30", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{s}</span>)}
+                        {resume.otherSkills?.map((s,i) => <span key={i} style={{ background:"#6366f112", color:"#818cf8", border:"1px solid #6366f130", borderRadius:6, padding:"3px 10px", fontSize:12 }}>{s}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {/* Experience bullets */}
+                  {resume.experienceBullets?.length > 0 && (
+                    <div style={{ background:"var(--bg)", borderRadius:12, padding:"14px 16px", border:"1px solid var(--border)" }}>
+                      <div style={{ fontSize:11, color:"#6366f1", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>Experience Bullet Points (tailored)</div>
+                      {resume.experienceBullets.map((b,i) => (
+                        <div key={i} style={{ display:"flex", gap:10, marginBottom:8, fontSize:13, color:"var(--text-muted)", lineHeight:1.6 }}>
+                          <span style={{ color:"#6366f1", flexShrink:0 }}>•</span><span>{b}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Skills gap reminder */}
+                  {resume.missingSkills?.length > 0 && (
+                    <div style={{ background:"#f59e0b10", borderRadius:10, padding:"12px 16px", border:"1px solid #f59e0b30" }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#f59e0b", marginBottom:6 }}>⚡ Boost your match — add these to your profile:</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                        {resume.missingSkills.map((s,i) => <span key={i} style={{ background:"#f59e0b15", color:"#fbbf24", border:"1px solid #f59e0b30", borderRadius:6, padding:"3px 10px", fontSize:12 }}>{s}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {/* Education */}
+                  {resume.education?.school && (
+                    <div style={{ background:"var(--bg)", borderRadius:12, padding:"14px 16px", border:"1px solid var(--border)", fontSize:13, color:"var(--text-muted)" }}>
+                      <div style={{ fontSize:11, color:"#6366f1", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Education</div>
+                      <strong style={{ color:"var(--text)" }}>{resume.education.school}</strong> · {resume.education.degree}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Description */}
-          {job.description && (
-            <div>
-              <div style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Description</div>
-              <div style={{
-                background:"var(--bg)", borderRadius:10, padding:"14px 16px", border:"1px solid var(--border)",
-                fontSize:13, color:"var(--text-muted)", lineHeight:1.75, whiteSpace:"pre-wrap",
-                maxHeight:220, overflowY:"auto",
-              }}>{job.description}</div>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div style={{ display:"flex", gap:10, flexWrap:"wrap", paddingTop:4 }}>
-            <a href={job.url} target="_blank" rel="noreferrer" style={{
-              flex:1, minWidth:130, textAlign:"center", padding:"11px 16px",
-              background:c, color:"#fff", borderRadius:10, fontWeight:700, fontSize:13, textDecoration:"none",
-            }}>Open Job ↗</a>
-            <a href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent((job.company||"")+" recruiter talent acquisition")}`}
-              target="_blank" rel="noreferrer" style={{
-              flex:1, minWidth:130, textAlign:"center", padding:"11px 16px",
-              background:"#0a66c220", color:"#0a66c2", borderRadius:10, fontWeight:700,
-              fontSize:13, textDecoration:"none", border:"1px solid #0a66c240",
-            }}>💼 Find Recruiter</a>
-            {(job.status==="easy-apply-pending"||job.status==="apply-failed"||job.status==="queued-manual") && (
-              <button onClick={() => onApply(job)} style={{
-                flex:1, minWidth:130, padding:"11px 16px", background:"#22c55e20",
-                color:"#22c55e", borderRadius:10, border:"1px solid #22c55e40",
-                fontWeight:700, fontSize:13, cursor:"pointer",
-              }}>⚡ Auto-Apply</button>
-            )}
-          </div>
-
-          {job.autoApplyNote && (
-            <div style={{ fontSize:12, color:"var(--text-dim)", background:"var(--bg)", borderRadius:8, padding:"10px 14px", border:"1px solid var(--border)" }}>
-              Note: {job.autoApplyNote}
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -606,7 +798,7 @@ export default function App() {
     return jobs;
   }, [foundJobs, jobSearch, minScore, filterPlatform, filterLocation, filterEasyApply, sortBy]);
 
-  const hotJobs = useMemo(() => foundJobs.filter(j => j.score >= 4).slice(0, 6), [foundJobs]);
+  const hotJobs = useMemo(() => foundJobs.filter(j => j.score >= 3.5).slice(0, 6), [foundJobs]);
 
   const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text).then(() => { setCopiedId(id); setTimeout(() => setCopiedId(null), 1500); });
@@ -810,13 +1002,35 @@ export default function App() {
 
           {/* Bot status & profile */}
           <div style={{ borderTop:"1px solid var(--border)", padding: sidebarCollapsed ? "12px 0" : "14px 14px" }}>
-            {!sidebarCollapsed && (
-              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-                <Avatar name={settings?.profile?.name || "Suma Chidara"} size={34}/>
-                <div>
-                  <div style={{ fontSize:12, fontWeight:700, color:"var(--text)" }}>{settings?.profile?.name || "Suma Chidara"}</div>
-                  <div style={{ fontSize:10, color:"var(--text-dim)" }}>Data Scientist</div>
+            {!sidebarCollapsed && (() => {
+              const prof = settings?.profile || {};
+              const displayName = prof.name || "Your Name";
+              const displayRole = (prof.targetRoles || "").split(",")[0].trim() || "Job Seeker";
+              const completeness = profileCompleteness(prof);
+              return (
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                    <Avatar name={displayName} size={34}/>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{displayName}</div>
+                      <div style={{ fontSize:10, color:"var(--text-dim)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{displayRole}</div>
+                    </div>
+                  </div>
+                  {/* Profile completeness bar */}
+                  <div style={{ marginBottom:2, display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ fontSize:9, color:"var(--text-dim)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Profile</span>
+                    <span style={{ fontSize:9, color: completeness === 100 ? "#22c55e" : "#f59e0b", fontWeight:700 }}>{completeness}%</span>
+                  </div>
+                  <div style={{ height:3, background:"var(--border)", borderRadius:4, overflow:"hidden" }}>
+                    <div style={{ height:"100%", width:`${completeness}%`, background: completeness === 100 ? "#22c55e" : "#6366f1", borderRadius:4, transition:"width 0.4s" }}/>
+                  </div>
+                  {completeness < 100 && <div onClick={() => setTab("settings")} style={{ fontSize:9, color:"#6366f1", cursor:"pointer", marginTop:3 }}>Complete profile →</div>}
                 </div>
+              );
+            })()}
+            {sidebarCollapsed && settings?.profile?.name && (
+              <div style={{ display:"flex", justifyContent:"center" }}>
+                <Avatar name={settings.profile.name} size={32}/>
               </div>
             )}
             <div style={{
@@ -881,7 +1095,7 @@ export default function App() {
                   <MetricCard label="Jobs Found"   value={stats.found}   color="#6366f1" icon="🔍" sub={`${stats.skipped} filtered out`} bar barMax={stats.found+stats.skipped}/>
                   <MetricCard label="Applications" value={applications.length} color="#22c55e" icon="✓" sub="tracked in dashboard"/>
                   <MetricCard label="Simplify"     value={statusCounts["simplify-opened"]||0} color="#a855f7" icon="✨" sub="form pre-filled"/>
-                  <MetricCard label="Hot Matches"  value={hotJobs.length} color="#f59e0b" icon="★" sub="score ≥ 4.0"/>
+                  <MetricCard label="Hot Matches"  value={stats?.hotMatches ?? hotJobs.length} color="#f59e0b" icon="★" sub="score ≥ 3.5"/>
                   <MetricCard label="Errors"       value={stats.errors}  color="#ef4444" icon="⚠" sub="this session"/>
                 </div>
 
@@ -928,11 +1142,11 @@ export default function App() {
                   <div>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
                       <div style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em" }}>
-                        ★ Hot Matches — Score 4.0+
+                        ★ Hot Matches — Score 3.5+
                       </div>
                       <button onClick={() => setTab("jobs")} style={{
                         background:"none", border:"none", color:"var(--indigo)", fontSize:12, cursor:"pointer", fontWeight:600,
-                      }}>View all {foundJobs.filter(j=>j.score>=4).length} →</button>
+                      }}>View all {foundJobs.filter(j=>j.score>=3.5).length} →</button>
                     </div>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))", gap:14 }}>
                       {hotJobs.map(job => <HotJobCard key={job.id} job={job} onClick={() => setSelectedJob(job)}/>)}
