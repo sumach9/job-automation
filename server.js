@@ -22,9 +22,9 @@ app.use(cors());
 app.use(express.json());
 
 // ─── Auth config ─────────────────────────────────────────────────────────────
-const JWT_SECRET    = process.env.JWT_SECRET    || "applyai-jwt-secret-change-in-production";
+const JWT_SECRET    = process.env.JWT_SECRET    || "jobpilot-jwt-secret-change-in-production";
 const ADMIN_USER    = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASS    = process.env.ADMIN_PASSWORD || "applyai2024";
+const ADMIN_PASS    = process.env.ADMIN_PASSWORD || "jobpilot2024";
 
 // POST /api/auth/login  — public, no token required
 app.post("/api/auth/login", (req, res) => {

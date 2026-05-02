@@ -4,7 +4,7 @@ const API = "/api";
 
 // ─── Authenticated fetch — injects JWT from localStorage ─────────────────────
 function apiFetch(url, opts = {}) {
-  const token = localStorage.getItem("applyai_token");
+  const token = localStorage.getItem("jobpilot_token");
   return fetch(url, {
     ...opts,
     headers: {
@@ -30,7 +30,7 @@ const STATUS_META = {
   "auto-applied":       { color:"#22c55e", label:"Auto Applied",  dot:"#22c55e" },
   "easy-apply-pending": { color:"#60a5fa", label:"Easy Apply",    dot:"#3b82f6" },
   "simplify-opened":    { color:"#c084fc", label:"Simplify",      dot:"#a855f7" },
-  "onetouch-filled":    { color:"#818cf8", label:"OneTouch",      dot:"#6366f1" },
+  "onetouch-filled":    { color:"#818cf8", label:"JobPilot",      dot:"#6366f1" },
   "browser-opened":     { color:"#fb923c", label:"Opened",        dot:"#f97316" },
   "queued-manual":      { color:"#94a3b8", label:"Queued",        dot:"#64748b" },
   "apply-failed":       { color:"#f87171", label:"Failed",        dot:"#ef4444" },
@@ -41,7 +41,7 @@ const STATUS_META = {
 
 const PIPELINE_STAGES = [
   { key:"queued-manual",   label:"Queued",       color:"#94a3b8", icon:"◷" },
-  { key:"onetouch-filled", label:"OneTouch",     color:"#818cf8", icon:"⚡" },
+  { key:"onetouch-filled", label:"JobPilot",     color:"#818cf8", icon:"⚡" },
   { key:"applied",         label:"Applied",      color:"#22c55e", icon:"✓" },
   { key:"interviewing",    label:"Interviewing", color:"#38bdf8", icon:"💬" },
   { key:"offered",         label:"Offered",      color:"#f59e0b", icon:"★" },
@@ -874,7 +874,7 @@ function ArchDiagram() {
     <div style={{ background:"var(--surface)", borderRadius:16, border:"1px solid var(--border)", overflow:"hidden" }}>
       <div style={{ background:"linear-gradient(135deg,#1e1b4b,#312e81)", padding:"20px 28px", borderBottom:"1px solid #6366f130" }}>
         <div style={{ fontSize:9, color:"#a5b4fc", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.15em", marginBottom:4 }}>SYSTEM ARCHITECTURE</div>
-        <div style={{ fontSize:18, fontWeight:800, color:"#fff" }}>ApplyAI — How It Works</div>
+        <div style={{ fontSize:18, fontWeight:800, color:"#fff" }}>JobPilot — How It Works</div>
         <div style={{ fontSize:12, color:"#a5b4fc", marginTop:4 }}>Chrome Extension + Node.js API + React Dashboard + AI Scorer</div>
       </div>
       <div style={{ padding:"24px", overflowX:"auto" }}>
@@ -943,9 +943,9 @@ function BillingTab({ showToast }) {
       {/* Hero */}
       <div style={{ background:"linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e3a5f 100%)", borderRadius:20, padding:"32px 36px", textAlign:"center" }}>
         <div style={{ fontSize:11, color:"#a5b4fc", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.15em", marginBottom:10 }}>PRICING</div>
-        <div style={{ fontSize:28, fontWeight:900, color:"#fff", marginBottom:10 }}>Apply smarter. Land faster.</div>
+        <div style={{ fontSize:28, fontWeight:900, color:"#fff", marginBottom:10 }}>Job search on autopilot.</div>
         <div style={{ fontSize:14, color:"#a5b4fc", maxWidth:480, margin:"0 auto" }}>
-          ApplyAI automates your entire job search — from discovery to offer. Choose a plan that fits your ambition.
+          JobPilot automates your entire job search — from discovery to offer. Let the pilot handle the applications.
         </div>
         {!stripeReady && (
           <div style={{ marginTop:16, background:"#f59e0b15", border:"1px solid #f59e0b40", borderRadius:10, padding:"10px 18px", display:"inline-block" }}>
@@ -1053,7 +1053,7 @@ function LoginPage({ onLogin }) {
         body: JSON.stringify({ username, password }),
       }).then(r => r.json());
       if (d.ok && d.token) {
-        localStorage.setItem("applyai_token", d.token);
+        localStorage.setItem("jobpilot_token", d.token);
         onLogin(d.token);
       } else {
         setError(d.message || "Invalid credentials");
@@ -1114,7 +1114,7 @@ function LoginPage({ onLogin }) {
                 display:"flex", alignItems:"center", justifyContent:"center",
                 fontSize:28, boxShadow:"0 8px 24px #6366f140",
               }}>⚡</div>
-              <div style={{ fontSize:24, fontWeight:900, letterSpacing:-.5, color:"#f0f0ff" }}>ApplyAI</div>
+              <div style={{ fontSize:24, fontWeight:900, letterSpacing:-.5, color:"#f0f0ff" }}>JobPilot</div>
               <div style={{ fontSize:13, color:"#50506a", marginTop:5 }}>Your automated job search command center</div>
             </div>
 
@@ -1183,13 +1183,13 @@ function LoginPage({ onLogin }) {
               <span style={{ color:"#2a2a42" }}>·</span>
               <span>🏠 Data stays local</span>
               <span style={{ color:"#2a2a42" }}>·</span>
-              <span>⚡ ApplyAI</span>
+              <span>⚡ JobPilot</span>
             </div>
           </div>
 
           {/* Version hint */}
           <div style={{ textAlign:"center", marginTop:14, fontSize:11, color:"#2a2a42" }}>
-            Default: <code style={{ color:"#383852" }}>admin</code> / <code style={{ color:"#383852" }}>applyai2024</code> — change in <code style={{ color:"#383852" }}>.env</code>
+            Default: <code style={{ color:"#383852" }}>admin</code> / <code style={{ color:"#383852" }}>jobpilot2024</code> — change in <code style={{ color:"#383852" }}>.env</code>
           </div>
         </div>
       </div>
@@ -1204,17 +1204,17 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("applyai_token");
+    const token = localStorage.getItem("jobpilot_token");
     if (!token) { setAuthChecked(true); return; }
     fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => { if (d.ok) setAuthed(true); else localStorage.removeItem("applyai_token"); })
+      .then(d => { if (d.ok) setAuthed(true); else localStorage.removeItem("jobpilot_token"); })
       .catch(() => {})
       .finally(() => setAuthChecked(true));
   }, []);
 
   const handleLogin  = (token) => { setAuthed(true); };
-  const handleLogout = () => { localStorage.removeItem("applyai_token"); setAuthed(false); };
+  const handleLogout = () => { localStorage.removeItem("jobpilot_token"); setAuthed(false); };
 
   // ── App state ───────────────────────────────────────────────────────────────
   const [tab, setTab]                       = useState("dashboard");
@@ -1401,7 +1401,7 @@ export default function App() {
   if (!authChecked) return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"#08080f", gap:16 }}>
       <div style={{ width:44, height:44, border:"3px solid #2a2a42", borderTopColor:"#6366f1", borderRadius:"50%", animation:"spin .7s linear infinite" }}/>
-      <span style={{ color:"#50506a", fontSize:13, fontFamily:"system-ui" }}>Loading ApplyAI…</span>
+      <span style={{ color:"#50506a", fontSize:13, fontFamily:"system-ui" }}>Loading JobPilot…</span>
       <style>{`
         @keyframes spin { to { transform:rotate(360deg); } }
         *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
@@ -1483,8 +1483,8 @@ export default function App() {
                   display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
                 }}>⚡</div>
                 <div>
-                  <div style={{ fontWeight:800, fontSize:15, letterSpacing:-.3 }}>OneTouch</div>
-                  <div style={{ fontSize:10, color:"var(--text-dim)", marginTop:1 }}>Apply in one click</div>
+                  <div style={{ fontWeight:800, fontSize:15, letterSpacing:-.3 }}>JobPilot</div>
+                  <div style={{ fontSize:10, color:"var(--text-dim)", marginTop:1 }}>Your job search co-pilot</div>
                 </div>
               </div>
             )}
