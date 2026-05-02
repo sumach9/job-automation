@@ -7,6 +7,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import Stripe from "stripe";
+import jwt from "jsonwebtoken";
 import { smartApply, detectPlatform, resetSession } from "./autoApply.js";
 import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES, ATS_COMPANY_COUNT } from "./atsScrapers.js";
 import { scoreJob, scoreLabel, scoreColor } from "./scorer.js";
@@ -18,6 +20,41 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ─── Auth config ─────────────────────────────────────────────────────────────
+const JWT_SECRET    = process.env.JWT_SECRET    || "applyai-jwt-secret-change-in-production";
+const ADMIN_USER    = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASS    = process.env.ADMIN_PASSWORD || "applyai2024";
+
+// POST /api/auth/login  — public, no token required
+app.post("/api/auth/login", (req, res) => {
+  const { username, password } = req.body || {};
+  if (username === ADMIN_USER && password === ADMIN_PASS) {
+    const token = jwt.sign({ sub: username, role: "admin" }, JWT_SECRET, { expiresIn: "30d" });
+    return res.json({ ok: true, token, username });
+  }
+  return res.status(401).json({ ok: false, message: "Invalid username or password" });
+});
+
+// Auth middleware — protects all /api/* except login + stripe webhook
+app.use("/api", (req, res, next) => {
+  if (req.path === "/auth/login")       return next(); // already handled above
+  if (req.path === "/billing/webhook")  return next(); // Stripe signs its own requests
+  const header = req.headers.authorization || "";
+  const token  = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ ok: false, message: "Unauthorized — please log in" });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ ok: false, message: "Session expired — please log in again" });
+  }
+});
+
+// GET /api/auth/me — verify token and return user info
+app.get("/api/auth/me", (req, res) => {
+  res.json({ ok: true, username: req.user.sub, role: req.user.role });
+});
 
 // ─── Serve React build in production ───────────────────────────────────────
 const clientBuild = path.join(__dirname, "client", "dist");
@@ -38,7 +75,7 @@ function loadData() {
   if (fs.existsSync(DATA_FILE)) {
     return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   }
-  return { applications: [], logs: [], foundJobs: [] };
+  return { applications: [], logs: [], foundJobs: [], profile: {} };
 }
 
 function saveData(data) {
@@ -49,7 +86,24 @@ function saveData(data) {
 let isRunning = false;
 let schedulerJob = null;
 let stats = { applied: 0, found: 0, skipped: 0, errors: 0 };
-const { applications, logs, foundJobs = [] } = loadData();
+const _loaded = loadData();
+const applications = _loaded.applications || [];
+const logs        = _loaded.logs        || [];
+// Reconstruct foundJobs from applications if not yet persisted
+const foundJobs   = (_loaded.foundJobs && _loaded.foundJobs.length)
+  ? _loaded.foundJobs
+  : applications.map(a => ({
+      id: a.id, title: a.title, company: a.company, location: a.location,
+      url: a.url || a.applyUrl, platform: a.platform, atsProvider: a.atsProvider,
+      score: a.score, scoreLabel: a.scoreLabel, scoreBreakdown: a.scoreBreakdown,
+      description: a.description || "", salary: a.salary || "",
+      skills: a.skills || [], matchedSkills: a.matchedSkills || [],
+      savedAt: a.savedAt, easyApply: a.easyApply || false,
+    }));
+// Seed stats from persisted data on startup
+stats.applied     = applications.length;
+stats.found       = foundJobs.length;
+stats.hotMatches  = foundJobs.filter(j => (j.score || 0) >= 3.5).length;
 
 const settings = {
   jobTitles: (process.env.JOB_TITLES || "Data Scientist,Data Engineer").split(",").map((s) => s.trim()),
@@ -69,31 +123,36 @@ const settings = {
   linkedinPassword: process.env.LINKEDIN_PASSWORD || "",
   simplifyMode: process.env.SIMPLIFY_MODE || "shell",
   simplifyAutoSubmit: process.env.SIMPLIFY_AUTO_SUBMIT === "true",
-  // Applicant profile — populated from extension popup via POST /api/profile
-  profile: {
-    name: process.env.APPLICANT_NAME || "",
-    firstName: "",
-    lastName: "",
-    email: process.env.APPLICANT_EMAIL || "",
-    phone: process.env.APPLICANT_PHONE || "",
-    location: process.env.APPLICANT_LOCATION || "",
-    linkedinUrl: process.env.APPLICANT_LINKEDIN_URL || "",
-    github: process.env.APPLICANT_GITHUB || "",
-    website: process.env.APPLICANT_WEBSITE || "",
-    school: process.env.APPLICANT_SCHOOL || "",
-    degree: process.env.APPLICANT_DEGREE || "",
-    major: process.env.APPLICANT_MAJOR || "",
-    yearsExperience: process.env.APPLICANT_YEARS_EXPERIENCE || "",
-    expectedSalary: process.env.APPLICANT_EXPECTED_SALARY || "",
-    skills: [],          // array — set from popup
-    targetRoles: process.env.JOB_TITLES || "",
-    remotePreference: "",
-    summary: "",
-    coverLetter: "",
-    resumePath: process.env.RESUME_PATH || "",
-    resumeFileName: "",
-    savedAt: null,
-  },
+  // Applicant profile — loaded from data.json, falls back to env vars
+  profile: (() => {
+    const p = _loaded.profile || {};
+    return {
+      name:            p.name            || process.env.APPLICANT_NAME || "",
+      firstName:       p.firstName       || "",
+      lastName:        p.lastName        || "",
+      email:           p.email           || process.env.APPLICANT_EMAIL || process.env.EMAIL_USER || "",
+      phone:           p.phone           || process.env.APPLICANT_PHONE || "",
+      location:        p.location        || process.env.APPLICANT_LOCATION || "",
+      linkedinUrl:     p.linkedinUrl     || "",
+      github:          p.github          || "",
+      website:         p.website         || "",
+      school:          p.school          || "",
+      degree:          p.degree          || "",
+      major:           p.major           || "",
+      yearsExperience: p.yearsExperience || process.env.APPLICANT_YEARS_EXPERIENCE || "",
+      expectedSalary:  p.expectedSalary  || "",
+      skills:          Array.isArray(p.skills) && p.skills.length ? p.skills : [],
+      targetRoles:     p.targetRoles     || process.env.JOB_TITLES || "",
+      education:       Array.isArray(p.education)    ? p.education    : [],
+      experiences:     Array.isArray(p.experiences)  ? p.experiences  : [],
+      remotePreference: p.remotePreference || "",
+      summary:         p.summary         || "",
+      coverLetter:     p.coverLetter     || "",
+      resumePath:      p.resumePath      || process.env.RESUME_PATH || "",
+      resumeFileName:  p.resumeFileName  || "",
+      savedAt:         p.savedAt         || null,
+    };
+  })(),
 };
 
 // ─── Scan history (TSV audit trail like career-ops) ─────────────────────────
@@ -122,7 +181,7 @@ function log(level, message, detail = "") {
   };
   logs.unshift(entry);
   if (logs.length > 500) logs.splice(500);
-  saveData({ applications, logs });
+  saveData({ applications, logs, foundJobs });
   console.log(`[${level.toUpperCase()}] ${message}${detail ? " — " + detail : ""}`);
 }
 
@@ -437,49 +496,57 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
   let autoApplyResult = null;
 
   const applyUrl = job.applyUrl || job.url || "";
-  const hasCredentials = settings.linkedinEmail && settings.linkedinPassword;
   const platform = detectPlatform(applyUrl);
 
-  // Cap browser opens per cycle — LinkedIn/Indeed auto-apply don't count toward limit
-  const wouldOpenBrowser = platform !== "linkedin" && platform !== "indeed";
-  if (wouldOpenBrowser && browserOpensThisCycle >= maxBrowserOpens) {
-    // Save as queued-manual — user can trigger manually from dashboard
+  // LinkedIn/Indeed require login credentials; ATS/other only need autoApplyEnabled
+  const hasLinkedInCreds = !!(settings.linkedinEmail && settings.linkedinPassword);
+  const isLinkedInOrIndeed = platform === "linkedin" || platform === "indeed";
+
+  // Cap browser opens per cycle (LinkedIn/Indeed Playwright doesn't count — it reuses one window)
+  if (!isLinkedInOrIndeed && browserOpensThisCycle >= maxBrowserOpens) {
+    // Hit the cap — queue for manual review instead
     const record = buildRecord(job, "queued-manual", null);
     applications.unshift(record);
     if (applications.length > 1000) applications.splice(1000);
     stats.applied++;
-    saveData({ applications, logs });
+    saveData({ applications, logs, foundJobs });
     return true;
   }
 
-  if (settings.autoApplyEnabled && hasCredentials && applyUrl) {
+  if (settings.autoApplyEnabled && applyUrl) {
     try {
-      autoApplyResult = await smartApply({
-        job,
-        credentials: {
-          linkedinEmail: settings.linkedinEmail,
-          linkedinPassword: settings.linkedinPassword,
-          indeedEmail: settings.linkedinEmail,      // reuse same email
-          indeedPassword: settings.linkedinPassword,
-        },
-        profile: settings.profile,
-        resumePath: settings.profile.resumePath,
-      });
-
-      if (autoApplyResult.success) {
-        status = "auto-applied";
-        log("success", `Auto-applied: ${job.title} @ ${job.company}`, autoApplyResult.reason);
-      } else if (autoApplyResult.simplifyUsed && autoApplyResult.browserOpened) {
-        status = "simplify-opened";
-        browserOpensThisCycle++;
-        log("info", `Simplify opened (${browserOpensThisCycle}): ${job.title} @ ${job.company}`);
-      } else if (autoApplyResult.browserOpened) {
-        status = "browser-opened";
-        browserOpensThisCycle++;
-        log("info", `Browser opened (${browserOpensThisCycle}): ${job.title} @ ${job.company}`);
+      // LinkedIn / Indeed — need credentials to log in first
+      if (isLinkedInOrIndeed && !hasLinkedInCreds) {
+        status = "queued-manual";
+        log("warning", `Skipped (no LinkedIn creds): ${job.title} @ ${job.company}`);
       } else {
-        status = "apply-failed";
-        log("warning", `Auto-apply failed: ${job.title} @ ${job.company}`, autoApplyResult.reason);
+        autoApplyResult = await smartApply({
+          job,
+          credentials: {
+            linkedinEmail:    settings.linkedinEmail,
+            linkedinPassword: settings.linkedinPassword,
+            indeedEmail:      settings.linkedinEmail,
+            indeedPassword:   settings.linkedinPassword,
+          },
+          profile:    settings.profile,
+          resumePath: settings.profile.resumePath,
+        });
+
+        if (autoApplyResult.success) {
+          status = "auto-applied";
+          log("success", `✅ Auto-applied: ${job.title} @ ${job.company}`, autoApplyResult.reason);
+        } else if (autoApplyResult.simplifyUsed && autoApplyResult.browserOpened) {
+          status = "simplify-opened";
+          browserOpensThisCycle++;
+          log("info", `Simplify opened (${browserOpensThisCycle}/${maxBrowserOpens}): ${job.title} @ ${job.company}`);
+        } else if (autoApplyResult.browserOpened) {
+          status = "browser-opened";
+          browserOpensThisCycle++;
+          log("info", `Browser opened (${browserOpensThisCycle}/${maxBrowserOpens}): ${job.title} @ ${job.company}`);
+        } else {
+          status = "apply-failed";
+          log("warning", `Auto-apply failed: ${job.title} @ ${job.company}`, autoApplyResult.reason);
+        }
       }
     } catch (err) {
       status = "apply-failed";
@@ -491,7 +558,7 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
   applications.unshift(record);
   if (applications.length > 1000) applications.splice(1000);
   stats.applied++;
-  saveData({ applications, logs });
+  saveData({ applications, logs, foundJobs });
   return true;
 }
 
@@ -725,7 +792,8 @@ app.post("/api/profile", (req, res) => {
   const fields = ["name","firstName","lastName","email","phone","location",
     "linkedinUrl","github","website","school","degree","major",
     "yearsExperience","expectedSalary","skills","targetRoles",
-    "remotePreference","summary","coverLetter","resumePath","resumeFileName","zipCode"];
+    "remotePreference","summary","coverLetter","resumePath","resumeFileName","zipCode",
+    "education","experiences"];
   for (const f of fields) {
     if (p[f] !== undefined) settings.profile[f] = p[f];
   }
@@ -735,6 +803,7 @@ app.post("/api/profile", (req, res) => {
     const roles = p.targetRoles.split(",").map(s => s.trim()).filter(Boolean);
     if (roles.length > 0) settings.jobTitles = roles;
   }
+  saveData({ applications, logs, foundJobs, profile: settings.profile });
   log("info", `Profile saved — ${settings.profile.name || "unnamed user"}`);
   res.json({ ok: true, profile: settings.profile });
 });
@@ -895,12 +964,12 @@ app.post("/api/apply/:id", async (req, res) => {
     if (result.jobDetails?.description) record.description = result.jobDetails.description;
     if (result.jobDetails?.skills?.length) record.skills = result.jobDetails.skills;
     if (result.jobDetails?.salary) record.salary = result.jobDetails.salary;
-    saveData({ applications, logs });
+    saveData({ applications, logs, foundJobs });
     log(result.success ? "success" : "warning", `Manual apply: ${record.title} @ ${record.company}`, result.reason);
   }).catch((err) => {
     record.status = "apply-failed";
     record.autoApplyNote = err.message;
-    saveData({ applications, logs });
+    saveData({ applications, logs, foundJobs });
     log("error", `Manual apply error: ${record.title}`, err.message);
   });
 });
@@ -992,7 +1061,7 @@ app.post("/api/onetouch-apply", (req, res) => {
     applications.push(record);
     seenUrls.add(job.url);
     logScanHistory(record, "onetouch-filled");
-    saveData({ applications, logs });
+    saveData({ applications, logs, foundJobs });
     log("success", `OneTouch filled: ${record.title} @ ${record.company}`, `Score ${record.score}`);
 
     res.json({ ok: true, id: record.id, score: record.score });
@@ -1032,7 +1101,7 @@ app.delete("/api/applications/:id", (req, res) => {
   const idx = applications.findIndex((a) => a.id === id);
   if (idx === -1) return res.status(404).json({ ok: false });
   applications.splice(idx, 1);
-  saveData({ applications, logs });
+  saveData({ applications, logs, foundJobs });
   res.json({ ok: true });
 });
 
@@ -1159,7 +1228,7 @@ app.patch("/api/applications/:id/stage", (req, res) => {
   record.status       = stage;
   record.stageUpdated = new Date().toISOString();
   if (stage === "applied") record.appliedAt = record.appliedAt || new Date().toISOString();
-  saveData({ applications, logs });
+  saveData({ applications, logs, foundJobs });
   log("success", `Pipeline: ${record.title} @ ${record.company} → ${stage}`);
   res.json({ ok: true, record });
 });
@@ -1182,6 +1251,300 @@ app.get("/api/pipeline", (req, res) => {
   res.json({ stages });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENTS SYSTEM — 5 autonomous agents, no LLM API required
+// ═══════════════════════════════════════════════════════════════════════════
+const agentRuns = {};
+
+const AGENT_DEFINITIONS = [
+  { id:"outreach-writer",   name:"Outreach Writer",    icon:"✉️",  color:"#6366f1",
+    description:"Generates personalised LinkedIn connection requests for your top hot-match jobs.",
+    configFields:[{ key:"topN", label:"Top N jobs", type:"number", default:5 },
+                  { key:"tone", label:"Tone", type:"select", options:["Professional","Friendly","Concise"], default:"Professional" }] },
+  { id:"followup-drafter",  name:"Follow-up Drafter",  icon:"📬", color:"#14b8a6",
+    description:"Finds applications with no update in N days and drafts a polite follow-up email.",
+    configFields:[{ key:"staleDays", label:"Days without update", type:"number", default:7 }] },
+  { id:"profile-optimizer", name:"Profile Optimizer",  icon:"🧠", color:"#a855f7",
+    description:"Scans hot-match job descriptions and recommends skills to add to your profile.",
+    configFields:[{ key:"minFreq", label:"Min appearances", type:"number", default:3 }] },
+  { id:"salary-analyst",    name:"Salary Analyst",     icon:"💰", color:"#f59e0b",
+    description:"Extracts salary ranges from job descriptions and gives you a market-rate breakdown.",
+    configFields:[] },
+  { id:"cold-scout",        name:"Cold Apply Scout",   icon:"🔭", color:"#22c55e",
+    description:"Finds ATS-direct job links at top companies matching your target roles.",
+    configFields:[{ key:"minScore", label:"Min score", type:"number", default:3.0 }] },
+];
+
+function runOutreachWriter(config = {}) {
+  const topN = parseInt(config.topN) || 5;
+  const tone = config.tone || "Professional";
+  const profile = settings.profile || {};
+  const name = profile.name || "Candidate";
+  const firstName = name.split(" ")[0] || "there";
+  const skills = Array.isArray(profile.skills) ? profile.skills : [];
+  const targetRole = (profile.targetRoles || "").split(",")[0].trim() || "the role";
+  const summary = (profile.summary || "").split(".")[0] || "";
+  const hot = [...foundJobs].filter(j => (j.score || 0) >= 3.5).sort((a,b) => (b.score||0)-(a.score||0)).slice(0, topN);
+  if (!hot.length) return { summary:"No hot-match jobs found (score >= 3.5). Run the scanner first.", items:[] };
+  const items = hot.map(job => {
+    const matched = skills.filter(s => (job.description || "").toLowerCase().includes(s.toLowerCase()));
+    const topSkills = matched.slice(0,3).join(", ") || skills.slice(0,2).join(", ") || "relevant skills";
+    let message;
+    if (tone === "Concise") {
+      message = `Hi [Recruiter],\n\nI noticed ${job.company} is hiring for ${job.title}. My background in ${topSkills} aligns well — would love to connect.\n\n${firstName}`;
+    } else if (tone === "Friendly") {
+      message = `Hey [Recruiter] 👋\n\nSaw the ${job.title} role at ${job.company} and got excited — ${summary ? summary + ". " : ""}Strong experience in ${topSkills}.\n\nWould love to chat!\n\n${firstName}`;
+    } else {
+      message = `Dear [Recruiter],\n\nI came across the ${job.title} position at ${job.company} and believe my experience is a strong match. I have worked extensively with ${topSkills}.\n\nI would welcome the opportunity to discuss further.\n\nBest regards,\n${name}`;
+    }
+    return { job:{ id:job.id, title:job.title, company:job.company, score:job.score, url:job.url }, message,
+      recruiterSearchUrl:`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(job.company+" recruiter talent acquisition")}` };
+  });
+  return { summary:`Generated ${items.length} outreach message(s) for top hot-match jobs.`, items };
+}
+
+function runFollowupDrafter(config = {}) {
+  const staleDays = parseInt(config.staleDays) || 7;
+  const profile = settings.profile || {};
+  const name = profile.name || "Candidate";
+  const email = profile.email || "[your email]";
+  const phone = profile.phone || "";
+  const now = Date.now();
+  const stale = applications.filter(a => {
+    if (a.status !== "applied" && a.status !== "onetouch-filled") return false;
+    return (now - new Date(a.appliedAt || a.savedAt || 0).getTime()) / 86400000 >= staleDays;
+  });
+  if (!stale.length) return { summary:`No applications older than ${staleDays} days without an update.`, items:[] };
+  const items = stale.map(app => {
+    const daysSince = Math.round((now - new Date(app.appliedAt || app.savedAt).getTime()) / 86400000);
+    const followUp = `Subject: Following Up — ${app.title} Application\n\nDear Hiring Team,\n\nI submitted my application for the ${app.title} position at ${app.company} approximately ${daysSince} days ago and wanted to follow up to reiterate my strong interest.\n\nPlease let me know if you need any additional information.\n\nBest regards,\n${name}\n${email}${phone ? "\n" + phone : ""}`;
+    return { app:{ id:app.id, title:app.title, company:app.company, daysSince, appliedAt:app.appliedAt||app.savedAt }, followUp };
+  });
+  return { summary:`Found ${items.length} stale application(s). Follow-up drafts ready.`, items };
+}
+
+function runProfileOptimizer(config = {}) {
+  const minFreq = parseInt(config.minFreq) || 3;
+  const profileSkills = Array.isArray(settings.profile?.skills) ? settings.profile.skills.map(s => s.toLowerCase().trim()) : [];
+  const topJobs = foundJobs.filter(j => (j.score || 0) >= 2.5);
+  if (!topJobs.length) return { summary:"No jobs with score >= 2.5 to analyse.", recommendations:[], alreadyHave:[] };
+  const techRx = /\b(Python|SQL|Java|Scala|Go|TypeScript|JavaScript|AWS|Azure|GCP|Docker|Kubernetes|Spark|Kafka|Airflow|dbt|PyTorch|TensorFlow|scikit-learn|pandas|React|FastAPI|PostgreSQL|MongoDB|Snowflake|Databricks|Tableau|LLM|RAG|MLflow|SageMaker|Terraform|Rust|GraphQL|Looker|Redshift|BigQuery|Hive|Flink|OpenAI|LangChain|HuggingFace|XGBoost|Power BI|Fivetran|Segment|Mixpanel|Amplitude|Vertex AI|Pinecone|Weaviate|Polars|Elasticsearch|Redis)\b/g;
+  const freq = {};
+  topJobs.forEach(job => {
+    const kws = [...new Set(((job.description || "") + " " + (job.title || "")).match(techRx) || [])];
+    kws.forEach(k => { freq[k] = (freq[k] || 0) + 1; });
+  });
+  const recommendations = Object.entries(freq).filter(([s,c]) => c >= minFreq && !profileSkills.includes(s.toLowerCase())).sort((a,b)=>b[1]-a[1]).slice(0,15)
+    .map(([skill,count]) => ({ skill, frequency:count, pctOfJobs:Math.round((count/topJobs.length)*100) }));
+  const alreadyHave = Object.entries(freq).filter(([s]) => profileSkills.includes(s.toLowerCase())).sort((a,b)=>b[1]-a[1]).slice(0,10)
+    .map(([skill,count]) => ({ skill, frequency:count }));
+  return { summary:`Analysed ${topJobs.length} jobs. Found ${recommendations.length} skills to add (>= ${minFreq} appearances).`, recommendations, alreadyHave, totalJobsAnalysed:topJobs.length };
+}
+
+function runSalaryAnalyst() {
+  const salaryRx = /\$[\d,]+(?:k)?(?:\s*[-]\s*\$[\d,]+(?:k)?)?(?:\s*(?:\/yr|\/year|per year|annually|a year))?/gi;
+  const roleGroups = {};
+  foundJobs.forEach(job => {
+    const text = (job.salary || "") + " " + (job.description || "");
+    const matches = text.match(salaryRx) || [];
+    const nums = matches.flatMap(m => {
+      const ns = m.replace(/[^\d-]/g," ").trim().split(/-+/).map(n => {
+        const v = parseInt(n.replace(/,/g,""));
+        return (m.includes("k") || v < 500) ? v * 1000 : v;
+      });
+      return ns.filter(n => n >= 40000 && n <= 800000);
+    });
+    if (!nums.length) return;
+    const role = (job.title || "Other").replace(/senior|junior|lead|principal|staff/gi,"").trim();
+    if (!roleGroups[role]) roleGroups[role] = [];
+    roleGroups[role].push(...nums);
+  });
+  const fmt = n => n >= 1000 ? `$${(n/1000).toFixed(0)}k` : `$${n}`;
+  const breakdown = Object.entries(roleGroups).map(([role,nums]) => {
+    const sorted = [...nums].sort((a,b)=>a-b);
+    const avg = Math.round(nums.reduce((s,n)=>s+n,0)/nums.length);
+    return { role, min:sorted[0], max:sorted[sorted.length-1], avg, median:sorted[Math.floor(sorted.length/2)], count:nums.length,
+      minFmt:fmt(sorted[0]), maxFmt:fmt(sorted[sorted.length-1]), avgFmt:fmt(avg), medianFmt:fmt(sorted[Math.floor(sorted.length/2)]) };
+  }).sort((a,b)=>b.avg-a.avg);
+  return { summary: breakdown.length ? `Found salary data in ${breakdown.reduce((s,r)=>s+r.count,0)} job(s) across ${breakdown.length} role type(s).` : "No salary data found in current job listings.", breakdown };
+}
+
+function runColdScout(config = {}) {
+  const minScore = parseFloat(config.minScore) || 3.0;
+  const targetRoles = (settings.profile?.targetRoles || settings.jobTitles?.join(",") || "").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const atsDirect = foundJobs.filter(j => j.platform === "atsDirect" && (j.score||0) >= minScore && (targetRoles.length === 0 || targetRoles.some(r => (j.title||"").toLowerCase().includes(r)))).sort((a,b)=>(b.score||0)-(a.score||0));
+  const grouped = {};
+  atsDirect.forEach(j => { const p = j.atsProvider || "Other"; if (!grouped[p]) grouped[p]=[]; grouped[p].push(j); });
+  return {
+    summary: atsDirect.length ? `Found ${atsDirect.length} ATS-direct job(s) matching your profile (score >= ${minScore}).` : "No qualifying ATS-direct jobs found. Try lowering the score filter.",
+    total: atsDirect.length,
+    grouped: Object.entries(grouped).map(([provider,jobs]) => ({ provider, count:jobs.length, jobs:jobs.slice(0,10).map(j=>({ id:j.id, title:j.title, company:j.company, score:j.score, url:j.url })) })),
+  };
+}
+
+app.get("/api/agents", (req, res) => {
+  res.json({ agents: AGENT_DEFINITIONS.map(a => ({ ...a, status:agentRuns[a.id]?.status||"idle", startedAt:agentRuns[a.id]?.startedAt||null, finishedAt:agentRuns[a.id]?.finishedAt||null, result:agentRuns[a.id]?.result||null })) });
+});
+
+app.post("/api/agents/:id/run", (req, res) => {
+  const { id } = req.params;
+  const def = AGENT_DEFINITIONS.find(a => a.id === id);
+  if (!def) return res.status(404).json({ ok:false, message:"Unknown agent" });
+  if (agentRuns[id]?.status === "running") return res.status(409).json({ ok:false, message:"Agent already running" });
+  const config = req.body?.config || {};
+  agentRuns[id] = { status:"running", startedAt:new Date().toISOString(), finishedAt:null, result:null };
+  try {
+    let result;
+    if (id === "outreach-writer")    result = runOutreachWriter(config);
+    else if (id === "followup-drafter")   result = runFollowupDrafter(config);
+    else if (id === "profile-optimizer")  result = runProfileOptimizer(config);
+    else if (id === "salary-analyst")     result = runSalaryAnalyst();
+    else if (id === "cold-scout")         result = runColdScout(config);
+    else result = { summary:"Agent not implemented.", items:[] };
+    agentRuns[id] = { status:"done", startedAt:agentRuns[id].startedAt, finishedAt:new Date().toISOString(), result };
+    log("success", `Agent "${def.name}" completed`, result.summary);
+    res.json({ ok:true, result });
+  } catch (err) {
+    agentRuns[id] = { status:"error", startedAt:agentRuns[id].startedAt, finishedAt:new Date().toISOString(), result:{ summary:err.message } };
+    res.status(500).json({ ok:false, message:err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BILLING — Stripe Integration
+// Set env vars: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+// Prices: STRIPE_PRICE_PRO (monthly), STRIPE_PRICE_ENTERPRISE (monthly)
+// ═══════════════════════════════════════════════════════════════════════════
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-04-10" })
+  : null;
+
+const PLANS = [
+  {
+    id: "free",
+    name: "Starter",
+    price: 0,
+    priceLabel: "Free",
+    priceId: null,
+    features: [
+      "100 applications / month",
+      "AI match scoring",
+      "Pipeline tracker",
+      "Chrome extension",
+      "Basic interview prep",
+    ],
+    limits: { applications: 100, agents: false, resumeGen: false },
+  },
+  {
+    id: "pro",
+    name: "Pro",
+    price: 29,
+    priceLabel: "$29 / month",
+    priceId: process.env.STRIPE_PRICE_PRO || null,
+    popular: true,
+    features: [
+      "Unlimited applications",
+      "All 5 AI Agents",
+      "Tailored resume generator",
+      "Salary market intel",
+      "Outreach message writer",
+      "Follow-up drafter",
+      "Priority support",
+    ],
+    limits: { applications: Infinity, agents: true, resumeGen: true },
+  },
+  {
+    id: "enterprise",
+    name: "Enterprise",
+    price: 99,
+    priceLabel: "$99 / month",
+    priceId: process.env.STRIPE_PRICE_ENTERPRISE || null,
+    features: [
+      "Everything in Pro",
+      "5 team seats",
+      "REST API access",
+      "White-label dashboard",
+      "Custom job board scrapers",
+      "Dedicated Slack support",
+      "SLA guarantee",
+    ],
+    limits: { applications: Infinity, agents: true, resumeGen: true, team: true },
+  },
+];
+
+// GET /api/billing/plans
+app.get("/api/billing/plans", (req, res) => {
+  res.json({ plans: PLANS, stripeConfigured: !!stripe });
+});
+
+// GET /api/billing/subscription
+app.get("/api/billing/subscription", (req, res) => {
+  const sub = _loaded.subscription || null;
+  res.json({ subscription: sub, plan: sub?.planId || "free" });
+});
+
+// POST /api/billing/checkout  { planId, successUrl, cancelUrl }
+app.post("/api/billing/checkout", async (req, res) => {
+  if (!stripe) return res.status(503).json({ ok: false, message: "Stripe not configured. Add STRIPE_SECRET_KEY to .env" });
+  const { planId, successUrl, cancelUrl } = req.body;
+  const plan = PLANS.find(p => p.id === planId);
+  if (!plan || !plan.priceId) return res.status(400).json({ ok: false, message: "Invalid plan or price not configured" });
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: [{ price: plan.priceId, quantity: 1 }],
+      success_url: successUrl || `${req.headers.origin || "http://localhost:3004"}/?billing=success`,
+      cancel_url:  cancelUrl  || `${req.headers.origin || "http://localhost:3004"}/?billing=cancelled`,
+      metadata: { planId: plan.id },
+    });
+    res.json({ ok: true, url: session.url, sessionId: session.id });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
+// POST /api/billing/portal  { customerId }
+app.post("/api/billing/portal", async (req, res) => {
+  if (!stripe) return res.status(503).json({ ok: false, message: "Stripe not configured" });
+  const customerId = req.body.customerId || _loaded.subscription?.customerId;
+  if (!customerId) return res.status(400).json({ ok: false, message: "No Stripe customer found" });
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: req.headers.origin || "http://localhost:3004",
+    });
+    res.json({ ok: true, url: session.url });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
+// POST /api/billing/webhook  — Stripe webhook (raw body)
+app.post("/api/billing/webhook", express.raw({ type: "application/json" }), (req, res) => {
+  const sig = req.headers["stripe-signature"];
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!stripe || !secret) return res.status(200).json({ received: true });
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, secret);
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const sub = { planId: session.metadata?.planId || "pro", customerId: session.customer, subscriptionId: session.subscription, status: "active", startedAt: new Date().toISOString() };
+    saveData({ applications, logs, foundJobs, profile: settings.profile, subscription: sub });
+    log("success", `Subscription activated — plan: ${sub.planId}`);
+  }
+  if (event.type === "customer.subscription.deleted") {
+    saveData({ applications, logs, foundJobs, profile: settings.profile, subscription: { planId: "free", status: "cancelled" } });
+    log("info", "Subscription cancelled — reverted to free plan");
+  }
+  res.json({ received: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 app.get("*", (req, res) => {
   const index = path.join(clientBuild, "index.html");
   if (fs.existsSync(index)) return res.sendFile(index);

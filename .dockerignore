@@ -1,0 +1,10 @@
+node_modules/
+client/node_modules/
+client/dist/
+.env
+data.json
+scan-history.tsv
+*.log
+logs/
+.git/
+screenshots/

@@ -2,6 +2,18 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 const API = "/api";
 
+// ─── Authenticated fetch — injects JWT from localStorage ─────────────────────
+function apiFetch(url, opts = {}) {
+  const token = localStorage.getItem("applyai_token");
+  return fetch(url, {
+    ...opts,
+    headers: {
+      ...(opts.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 const LEVEL_COLOR = { info:"#6366f1", success:"#22c55e", warning:"#f59e0b", error:"#ef4444" };
 
@@ -41,7 +53,9 @@ const NAV = [
   { id:"pipeline",     icon:"⇒",  label:"Pipeline"     },
   { id:"jobs",         icon:"◈",  label:"Jobs"         },
   { id:"applications", icon:"☰",  label:"Applications" },
-  { id:"logs",         icon:"≡",  label:"Logs"         },
+  { id:"agents",       icon:"🤖", label:"Agents"       },
+  { id:"architecture", icon:"⬡",  label:"Architecture" },
+  { id:"billing",      icon:"💳", label:"Billing"      },
   { id:"settings",     icon:"◎",  label:"Settings"     },
 ];
 
@@ -372,7 +386,7 @@ function JobModal({ job, onClose, onApply }) {
   async function loadSkillGap() {
     setLoadingGap(true); setActiveTab("gap");
     try {
-      const d = await fetch(`${API}/skill-gap`, {
+      const d = await apiFetch(`${API}/skill-gap`, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ job }),
       }).then(r => r.json());
@@ -384,7 +398,7 @@ function JobModal({ job, onClose, onApply }) {
   async function loadResume() {
     setLoadingResume(true); setActiveTab("resume");
     try {
-      const d = await fetch(`${API}/generate-resume`, {
+      const d = await apiFetch(`${API}/generate-resume`, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ job }),
       }).then(r => r.json());
@@ -689,8 +703,520 @@ function Field({ label, children }) {
   );
 }
 
+// ─── Agents Tab ───────────────────────────────────────────────────────────────
+function AgentsTab({ showToast }) {
+  const [agents, setAgents]     = useState([]);
+  const [running, setRunning]   = useState({});
+  const [expanded, setExpanded] = useState({});
+  const [configs, setConfigs]   = useState({});
+  const [results, setResults]   = useState({});
+
+  const load = useCallback(async () => {
+    try {
+      const d = await apiFetch(`${API}/agents`).then(r => r.json());
+      setAgents(d.agents || []);
+      (d.agents || []).forEach(a => { if (a.result) setResults(p => ({ ...p, [a.id]: a.result })); });
+    } catch {}
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const runAgent = async (id) => {
+    setRunning(r => ({ ...r, [id]: true }));
+    try {
+      const d = await apiFetch(`${API}/agents/${id}/run`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ config: configs[id] || {} }),
+      }).then(r => r.json());
+      if (d.ok) { setResults(r => ({ ...r, [id]: d.result })); setExpanded(e => ({ ...e, [id]: true })); showToast("Agent completed ✓"); }
+      else showToast(d.message || "Agent failed", "error");
+    } catch { showToast("Cannot reach server", "error"); }
+    setRunning(r => ({ ...r, [id]: false }));
+  };
+
+  const updCfg = (aid, key, val) => setConfigs(c => ({ ...c, [aid]: { ...(c[aid]||{}), [key]: val } }));
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      <div style={{ background:"linear-gradient(135deg,#1e1b4b,#312e81)", borderRadius:16, padding:"20px 24px", border:"1px solid #6366f130", display:"flex", alignItems:"center", gap:16 }}>
+        <div style={{ fontSize:36 }}>🤖</div>
+        <div>
+          <div style={{ fontSize:18, fontWeight:800, color:"#fff" }}>AI Agent Suite</div>
+          <div style={{ fontSize:12, color:"#a5b4fc", marginTop:3 }}>5 autonomous agents — no LLM API key required.</div>
+        </div>
+      </div>
+      {agents.map(agent => {
+        const res = results[agent.id]; const isOpen = expanded[agent.id]; const cfg = configs[agent.id] || {}; const isRun = running[agent.id];
+        return (
+          <div key={agent.id} style={{ background:"var(--surface)", borderRadius:16, border:`1px solid ${agent.color}25`, overflow:"hidden" }}>
+            <div style={{ padding:"18px 22px", display:"flex", alignItems:"center", gap:14 }}>
+              <div style={{ width:48, height:48, borderRadius:12, flexShrink:0, background:`${agent.color}18`, border:`1px solid ${agent.color}30`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{agent.icon}</div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, fontWeight:800, color:"var(--text)", marginBottom:2 }}>{agent.name}</div>
+                <div style={{ fontSize:12, color:"var(--text-dim)", lineHeight:1.5 }}>{agent.description}</div>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
+                {res && <span style={{ fontSize:10, color:agent.color, background:agent.color+"15", border:`1px solid ${agent.color}30`, borderRadius:20, padding:"3px 10px", fontWeight:700 }}>Done ✓</span>}
+                <button onClick={() => runAgent(agent.id)} disabled={isRun} style={{ padding:"9px 20px", borderRadius:10, border:"none", background:isRun?"var(--surface2)":`linear-gradient(135deg,${agent.color},${agent.color}cc)`, color:isRun?"var(--text-dim)":"#fff", fontWeight:700, fontSize:12, cursor:isRun?"not-allowed":"pointer" }}>
+                  {isRun ? "⏳ Running…" : "▶ Run"}
+                </button>
+                {res && <button onClick={() => setExpanded(e => ({ ...e, [agent.id]: !isOpen }))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", color:"var(--text-dim)", borderRadius:8, cursor:"pointer", width:32, height:32, fontSize:14 }}>{isOpen?"▲":"▼"}</button>}
+              </div>
+            </div>
+            {agent.configFields?.length > 0 && (
+              <div style={{ borderTop:"1px solid var(--border)", padding:"10px 22px", background:"var(--bg)", display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
+                <span style={{ fontSize:10, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em" }}>Config</span>
+                {agent.configFields.map(f => (
+                  <label key={f.key} style={{ display:"flex", alignItems:"center", gap:7, fontSize:12, color:"var(--text-muted)" }}>
+                    {f.label}:
+                    {f.type === "select"
+                      ? <select value={cfg[f.key]??f.default} onChange={e=>updCfg(agent.id,f.key,e.target.value)} style={{ background:"var(--surface2)", border:"1px solid var(--border)", color:"var(--text)", borderRadius:6, padding:"3px 8px", fontSize:12 }}>{(f.options||[]).map(o=><option key={o}>{o}</option>)}</select>
+                      : <input type="number" value={cfg[f.key]??f.default} onChange={e=>updCfg(agent.id,f.key,e.target.value)} style={{ width:60, background:"var(--surface2)", border:"1px solid var(--border)", color:"var(--text)", borderRadius:6, padding:"3px 8px", fontSize:12 }}/>}
+                  </label>
+                ))}
+              </div>
+            )}
+            {isOpen && res && (
+              <div style={{ borderTop:`2px solid ${agent.color}30`, padding:"18px 22px" }}>
+                <div style={{ background:agent.color+"12", borderRadius:10, padding:"10px 14px", marginBottom:14, border:`1px solid ${agent.color}25`, fontSize:12, color:agent.color, fontWeight:600 }}>📊 {res.summary}</div>
+                {(agent.id==="outreach-writer") && res.items?.map((item,i) => (
+                  <div key={i} style={{ marginBottom:10, background:"var(--bg)", borderRadius:10, border:"1px solid var(--border)", overflow:"hidden" }}>
+                    <div style={{ padding:"9px 14px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:10 }}>
+                      <Avatar name={item.job.company} size={24}/><span style={{ fontSize:12, fontWeight:700, color:"var(--text)" }}>{item.job.title} @ {item.job.company}</span>
+                      <ScoreRing score={item.job.score} size={30}/>
+                      <a href={item.recruiterSearchUrl} target="_blank" rel="noreferrer" style={{ marginLeft:"auto", fontSize:10, color:"#6366f1", border:"1px solid #6366f130", borderRadius:6, padding:"4px 10px", textDecoration:"none", fontWeight:700 }}>Find Recruiter →</a>
+                    </div>
+                    <pre style={{ margin:0, padding:"12px 14px", fontSize:11, color:"var(--text-muted)", whiteSpace:"pre-wrap", lineHeight:1.7, fontFamily:"system-ui" }}>{item.message}</pre>
+                    <div style={{ padding:"8px 14px", borderTop:"1px solid var(--border)" }}>
+                      <button onClick={()=>navigator.clipboard.writeText(item.message).then(()=>showToast("Copied!"))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", color:"var(--text-dim)", borderRadius:6, padding:"4px 12px", fontSize:11, cursor:"pointer" }}>📋 Copy</button>
+                    </div>
+                  </div>
+                ))}
+                {(agent.id==="followup-drafter") && res.items?.map((item,i) => (
+                  <div key={i} style={{ marginBottom:10, background:"var(--bg)", borderRadius:10, border:"1px solid var(--border)", overflow:"hidden" }}>
+                    <div style={{ padding:"9px 14px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:10 }}>
+                      <Avatar name={item.app.company} size={24}/><span style={{ fontSize:12, fontWeight:700, color:"var(--text)" }}>{item.app.title} @ {item.app.company}</span>
+                      <span style={{ marginLeft:"auto", fontSize:10, background:"#f59e0b15", color:"#f59e0b", border:"1px solid #f59e0b30", borderRadius:20, padding:"2px 10px", fontWeight:700 }}>{item.app.daysSince}d ago</span>
+                    </div>
+                    <pre style={{ margin:0, padding:"12px 14px", fontSize:11, color:"var(--text-muted)", whiteSpace:"pre-wrap", lineHeight:1.7, fontFamily:"system-ui" }}>{item.followUp}</pre>
+                    <div style={{ padding:"8px 14px", borderTop:"1px solid var(--border)" }}>
+                      <button onClick={()=>navigator.clipboard.writeText(item.followUp).then(()=>showToast("Copied!"))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", color:"var(--text-dim)", borderRadius:6, padding:"4px 12px", fontSize:11, cursor:"pointer" }}>📋 Copy</button>
+                    </div>
+                  </div>
+                ))}
+                {(agent.id==="profile-optimizer") && (
+                  <div>
+                    {res.alreadyHave?.length>0 && <div style={{ marginBottom:12 }}>
+                      <div style={{ fontSize:9, color:"#22c55e", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:7 }}>✅ Skills you already have (in demand)</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>{res.alreadyHave.map(s=><span key={s.skill} style={{ background:"#22c55e12", color:"#22c55e", border:"1px solid #22c55e25", borderRadius:20, padding:"3px 12px", fontSize:11, fontWeight:600 }}>✓ {s.skill} ×{s.frequency}</span>)}</div>
+                    </div>}
+                    {res.recommendations?.length>0 && <div>
+                      <div style={{ fontSize:9, color:"#f59e0b", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:7 }}>🎯 Recommended skills to add</div>
+                      {res.recommendations.map(r=>(
+                        <div key={r.skill} style={{ display:"flex", alignItems:"center", gap:12, background:"var(--bg)", borderRadius:8, padding:"7px 12px", border:"1px solid var(--border)", marginBottom:5 }}>
+                          <div style={{ flex:1, fontSize:12, fontWeight:700, color:"var(--text)" }}>{r.skill}</div>
+                          <div style={{ width:80, height:5, background:"var(--border)", borderRadius:3 }}><div style={{ height:"100%", width:`${r.pctOfJobs}%`, background:"#f59e0b", borderRadius:3 }}/></div>
+                          <div style={{ fontSize:11, color:"#f59e0b", fontWeight:700, minWidth:50, textAlign:"right" }}>{r.pctOfJobs}% of jobs</div>
+                        </div>
+                      ))}
+                    </div>}
+                  </div>
+                )}
+                {(agent.id==="salary-analyst") && res.breakdown?.length>0 && res.breakdown.map(r=>(
+                  <div key={r.role} style={{ background:"var(--bg)", borderRadius:10, padding:"11px 14px", border:"1px solid var(--border)", display:"flex", alignItems:"center", gap:14, marginBottom:6 }}>
+                    <div style={{ flex:1, minWidth:0 }}><div style={{ fontSize:12, fontWeight:700, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{r.role}</div><div style={{ fontSize:10, color:"var(--text-dim)" }}>{r.count} mention{r.count!==1?"s":""}</div></div>
+                    {[["Min",r.minFmt,"#94a3b8"],["Avg",r.avgFmt,"#f59e0b"],["Max",r.maxFmt,"#22c55e"]].map(([lbl,val,c])=>(
+                      <div key={lbl} style={{ textAlign:"center" }}><div style={{ fontSize:14, fontWeight:800, color:c }}>{val}</div><div style={{ fontSize:9, color:"var(--text-dim)", textTransform:"uppercase" }}>{lbl}</div></div>
+                    ))}
+                  </div>
+                ))}
+                {(agent.id==="cold-scout") && res.grouped?.map(group=>(
+                  <div key={group.provider} style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:10, color:"#22c55e", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:7 }}>{group.provider} · {group.count} job{group.count!==1?"s":""}</div>
+                    {group.jobs.map(j=>(
+                      <div key={j.id} style={{ background:"var(--bg)", borderRadius:8, padding:"8px 12px", border:"1px solid var(--border)", display:"flex", alignItems:"center", gap:10, marginBottom:5 }}>
+                        <Avatar name={j.company} size={24}/><div style={{ flex:1, minWidth:0 }}><div style={{ fontSize:12, fontWeight:700, color:"var(--text)" }}>{j.title}</div><div style={{ fontSize:10, color:"var(--text-dim)" }}>{j.company}</div></div>
+                        <ScoreRing score={j.score} size={28}/>
+                        <a href={j.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:"#22c55e", border:"1px solid #22c55e30", borderRadius:6, padding:"4px 10px", textDecoration:"none", fontWeight:700 }}>Apply →</a>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Architecture Diagram ─────────────────────────────────────────────────────
+function ArchDiagram() {
+  const nodes = [
+    { id:"jb",   x:300, y:20,  w:300, h:65,  color:"#3b82f6", icon:"🌐", label:"Job Boards", sub:"LinkedIn · Indeed · Glassdoor · ZipRecruiter · ATS Direct" },
+    { id:"srv",  x:295, y:200, w:310, h:85,  color:"#6366f1", icon:"⚙️", label:"server.js — Node.js / Express", sub:"REST API · Apify · SerpAPI · port 3004" },
+    { id:"ext",  x:20,  y:200, w:180, h:85,  color:"#a855f7", icon:"🧩", label:"Chrome Extension", sub:"content.js · popup · background.js" },
+    { id:"dash", x:700, y:200, w:180, h:85,  color:"#14b8a6", icon:"📊", label:"React Dashboard", sub:"Vite SPA · 8 tabs" },
+    { id:"scr",  x:160, y:375, w:180, h:70,  color:"#f59e0b", icon:"🎯", label:"scorer.js", sub:"0–5 profile-aware scoring" },
+    { id:"db",   x:530, y:375, w:180, h:70,  color:"#22c55e", icon:"🗄️", label:"data.json", sub:"apps · jobs · profile" },
+  ];
+  const cx = n => n.x + n.w/2; const cy = n => n.y + n.h/2; const get = id => nodes.find(n=>n.id===id);
+  const Arrow = ({ from, to, label, color="#6366f150", bend=0 }) => {
+    const f=get(from),t=get(to); if(!f||!t) return null;
+    const x1=cx(f),y1=cy(f),x2=cx(t),y2=cy(t),mx=(x1+x2)/2+bend,my=(y1+y2)/2;
+    return (<g><defs><marker id={`arr-${from}-${to}`} markerWidth={8} markerHeight={8} refX={7} refY={3} orient="auto"><path d="M0,0 L0,6 L8,3 z" fill={color} opacity={0.85}/></marker></defs>
+      <path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`} fill="none" stroke={color} strokeWidth={1.8} strokeDasharray="5 3" markerEnd={`url(#arr-${from}-${to})`} opacity={0.75}/>
+      {label && <text x={mx} y={my-7} textAnchor="middle" fill={color} fontSize={9} fontWeight={700} opacity={0.9}>{label}</text>}
+    </g>);
+  };
+  return (
+    <div style={{ background:"var(--surface)", borderRadius:16, border:"1px solid var(--border)", overflow:"hidden" }}>
+      <div style={{ background:"linear-gradient(135deg,#1e1b4b,#312e81)", padding:"20px 28px", borderBottom:"1px solid #6366f130" }}>
+        <div style={{ fontSize:9, color:"#a5b4fc", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.15em", marginBottom:4 }}>SYSTEM ARCHITECTURE</div>
+        <div style={{ fontSize:18, fontWeight:800, color:"#fff" }}>ApplyAI — How It Works</div>
+        <div style={{ fontSize:12, color:"#a5b4fc", marginTop:4 }}>Chrome Extension + Node.js API + React Dashboard + AI Scorer</div>
+      </div>
+      <div style={{ padding:"24px", overflowX:"auto" }}>
+        <svg viewBox="0 0 900 480" width="100%" style={{ maxWidth:900, display:"block", margin:"0 auto" }}>
+          <Arrow from="jb" to="srv" label="Apify/SerpAPI" color="#3b82f6"/>
+          <Arrow from="ext" to="srv" label="profile sync" color="#a855f7" bend={-30}/>
+          <Arrow from="srv" to="dash" label="REST API" color="#14b8a6"/>
+          <Arrow from="ext" to="jb" label="auto-fill" color="#a855f750" bend={60}/>
+          <Arrow from="srv" to="scr" label="scoreJob()" color="#f59e0b"/>
+          <Arrow from="srv" to="db" label="saveData()" color="#22c55e"/>
+          <Arrow from="dash" to="srv" label="fetch/POST" color="#14b8a650" bend={30}/>
+          {nodes.map(n => (
+            <g key={n.id}>
+              <rect x={n.x+3} y={n.y+3} width={n.w} height={n.h} rx={12} fill={n.color} opacity={0.1}/>
+              <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={12} fill="#1e1b4b" stroke={n.color} strokeWidth={1.5} opacity={0.95}/>
+              <rect x={n.x} y={n.y} width={n.w} height={3} rx={12} fill={n.color} opacity={0.9}/>
+              <text x={n.x+14} y={n.y+26} fontSize={17}>{n.icon}</text>
+              <text x={n.x+40} y={n.y+24} fill="#fff" fontSize={11} fontWeight={700} fontFamily="system-ui">{n.label}</text>
+              <text x={n.x+14} y={n.y+42} fill={n.color} fontSize={9} opacity={0.8} fontFamily="system-ui">{n.sub}</text>
+            </g>
+          ))}
+          <g transform="translate(20,460)">
+            {[["#a855f7","Extension"],["#6366f1","Server"],["#14b8a6","Dashboard"],["#3b82f6","Job Boards"],["#f59e0b","Scorer"],["#22c55e","Storage"]].map(([c,l],i)=>(
+              <g key={l} transform={`translate(${i*140},0)`}><rect x={0} y={-8} width={10} height={10} rx={2} fill={c} opacity={0.85}/><text x={14} y={0} fill="#94a3b8" fontSize={10} fontFamily="system-ui">{l}</text></g>
+            ))}
+          </g>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+// ─── Billing Tab ──────────────────────────────────────────────────────────────
+function BillingTab({ showToast }) {
+  const [plans, setPlans]   = useState([]);
+  const [sub, setSub]       = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [stripeReady, setStripeReady] = useState(false);
+
+  useEffect(() => {
+    apiFetch(`${API}/billing/plans`).then(r=>r.json()).then(d => { setPlans(d.plans||[]); setStripeReady(d.stripeConfigured); });
+    apiFetch(`${API}/billing/subscription`).then(r=>r.json()).then(d => setSub(d));
+  }, []);
+
+  const checkout = async (planId) => {
+    if (!stripeReady) { showToast("Add STRIPE_SECRET_KEY to .env to enable payments","error"); return; }
+    setLoading(true);
+    try {
+      const d = await apiFetch(`${API}/billing/checkout`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ planId }) }).then(r=>r.json());
+      if (d.ok && d.url) window.location.href = d.url;
+      else showToast(d.message||"Checkout failed","error");
+    } catch { showToast("Cannot reach server","error"); }
+    setLoading(false);
+  };
+
+  const openPortal = async () => {
+    const d = await apiFetch(`${API}/billing/portal`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}).then(r=>r.json());
+    if (d.ok && d.url) window.open(d.url,"_blank");
+    else showToast(d.message||"Portal unavailable","error");
+  };
+
+  const currentPlan = sub?.plan || "free";
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:24 }}>
+      {/* Hero */}
+      <div style={{ background:"linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e3a5f 100%)", borderRadius:20, padding:"32px 36px", textAlign:"center" }}>
+        <div style={{ fontSize:11, color:"#a5b4fc", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.15em", marginBottom:10 }}>PRICING</div>
+        <div style={{ fontSize:28, fontWeight:900, color:"#fff", marginBottom:10 }}>Apply smarter. Land faster.</div>
+        <div style={{ fontSize:14, color:"#a5b4fc", maxWidth:480, margin:"0 auto" }}>
+          ApplyAI automates your entire job search — from discovery to offer. Choose a plan that fits your ambition.
+        </div>
+        {!stripeReady && (
+          <div style={{ marginTop:16, background:"#f59e0b15", border:"1px solid #f59e0b40", borderRadius:10, padding:"10px 18px", display:"inline-block" }}>
+            <span style={{ fontSize:11, color:"#f59e0b", fontWeight:600 }}>⚠ Add <code style={{ background:"#f59e0b20", padding:"1px 6px", borderRadius:4 }}>STRIPE_SECRET_KEY</code> to .env to enable payments</span>
+          </div>
+        )}
+      </div>
+
+      {/* Pricing cards */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16 }}>
+        {plans.map(plan => {
+          const active = currentPlan === plan.id;
+          return (
+            <div key={plan.id} style={{
+              background: plan.popular ? "linear-gradient(180deg,#312e81,#1e1b4b)" : "var(--surface)",
+              borderRadius:18, padding:"28px 24px",
+              border: active ? "2px solid #6366f1" : plan.popular ? "1px solid #6366f150" : "1px solid var(--border)",
+              position:"relative", display:"flex", flexDirection:"column",
+            }}>
+              {plan.popular && <div style={{ position:"absolute", top:-12, left:"50%", transform:"translateX(-50%)", background:"linear-gradient(135deg,#6366f1,#a855f7)", color:"#fff", borderRadius:20, padding:"4px 16px", fontSize:10, fontWeight:800, whiteSpace:"nowrap" }}>MOST POPULAR</div>}
+              {active && <div style={{ position:"absolute", top:-12, right:20, background:"#22c55e", color:"#fff", borderRadius:20, padding:"4px 12px", fontSize:10, fontWeight:800 }}>CURRENT</div>}
+              <div style={{ fontSize:12, fontWeight:700, color: plan.popular?"#a5b4fc":"var(--text-dim)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>{plan.name}</div>
+              <div style={{ display:"flex", alignItems:"baseline", gap:4, marginBottom:6 }}>
+                <span style={{ fontSize:36, fontWeight:900, color: plan.popular?"#fff":"var(--text)" }}>{plan.price === 0 ? "Free" : `$${plan.price}`}</span>
+                {plan.price > 0 && <span style={{ fontSize:13, color: plan.popular?"#a5b4fc":"var(--text-dim)" }}>/month</span>}
+              </div>
+              <div style={{ flex:1, marginBottom:20 }}>
+                {plan.features.map((f,i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 0", fontSize:12, color: plan.popular?"#c7d2fe":"var(--text-muted)" }}>
+                    <span style={{ color: plan.popular?"#818cf8":"#6366f1", flexShrink:0 }}>✓</span>{f}
+                  </div>
+                ))}
+              </div>
+              {active ? (
+                <button onClick={openPortal} style={{ padding:"11px 20px", borderRadius:10, border:"1px solid #6366f150", background:"transparent", color:"#6366f1", fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                  Manage Subscription
+                </button>
+              ) : plan.price === 0 ? (
+                <button disabled style={{ padding:"11px 20px", borderRadius:10, border:"1px solid var(--border)", background:"transparent", color:"var(--text-dim)", fontWeight:700, fontSize:13 }}>Current Plan</button>
+              ) : (
+                <button onClick={() => checkout(plan.id)} disabled={loading || !stripeReady} style={{
+                  padding:"11px 20px", borderRadius:10, border:"none",
+                  background: stripeReady ? "linear-gradient(135deg,#6366f1,#a855f7)" : "var(--surface2)",
+                  color: stripeReady ? "#fff" : "var(--text-dim)", fontWeight:700, fontSize:13, cursor: stripeReady?"pointer":"not-allowed",
+                }}>
+                  {loading ? "…" : `Upgrade to ${plan.name} →`}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Current subscription status */}
+      {sub?.subscription && (
+        <div style={{ background:"var(--surface)", borderRadius:14, padding:"18px 22px", border:"1px solid #22c55e30", display:"flex", alignItems:"center", gap:16 }}>
+          <span style={{ fontSize:24 }}>✅</span>
+          <div>
+            <div style={{ fontSize:13, fontWeight:700, color:"var(--text)" }}>Active Subscription — {(sub.subscription.planId||"pro").charAt(0).toUpperCase()+(sub.subscription.planId||"pro").slice(1)} Plan</div>
+            <div style={{ fontSize:11, color:"var(--text-dim)" }}>Started {sub.subscription.startedAt ? new Date(sub.subscription.startedAt).toLocaleDateString() : "—"} · Status: {sub.subscription.status}</div>
+          </div>
+          <button onClick={openPortal} style={{ marginLeft:"auto", padding:"8px 18px", borderRadius:8, border:"1px solid var(--border)", background:"transparent", color:"var(--text-muted)", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+            Manage →
+          </button>
+        </div>
+      )}
+
+      {/* Setup guide */}
+      <div style={{ background:"var(--surface)", borderRadius:14, padding:"20px 24px", border:"1px solid var(--border)" }}>
+        <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", marginBottom:14 }}>🔧 Payment Setup — 3 steps</div>
+        {[
+          { n:1, title:"Create a Stripe account", desc:"Sign up at stripe.com → create a product with two prices (Pro $29/mo, Enterprise $99/mo)" },
+          { n:2, title:"Add keys to .env", desc:"STRIPE_SECRET_KEY=sk_live_... · STRIPE_PRICE_PRO=price_... · STRIPE_PRICE_ENTERPRISE=price_... · STRIPE_WEBHOOK_SECRET=whsec_..." },
+          { n:3, title:"Add webhook endpoint", desc:"In Stripe dashboard → Webhooks → add https://yourdomain.com/api/billing/webhook → events: checkout.session.completed, customer.subscription.deleted" },
+        ].map(s => (
+          <div key={s.n} style={{ display:"flex", gap:14, marginBottom:14, alignItems:"flex-start" }}>
+            <div style={{ width:26, height:26, borderRadius:"50%", background:"linear-gradient(135deg,#6366f1,#a855f7)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800, color:"#fff", flexShrink:0 }}>{s.n}</div>
+            <div>
+              <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", marginBottom:2 }}>{s.title}</div>
+              <div style={{ fontSize:11, color:"var(--text-dim)", lineHeight:1.55 }}>{s.desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Login Page ───────────────────────────────────────────────────────────────
+function LoginPage({ onLogin }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const d = await fetch(`${API}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      }).then(r => r.json());
+      if (d.ok && d.token) {
+        localStorage.setItem("applyai_token", d.token);
+        onLogin(d.token);
+      } else {
+        setError(d.message || "Invalid credentials");
+      }
+    } catch {
+      setError("Cannot reach server — make sure it is running");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <>
+      <style>{`
+        *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+        html, body, #root { height:100%; }
+        body { background:#08080f; color:#f0f0ff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+        @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+        @keyframes orb1 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(40px,-30px) scale(1.1); } }
+        @keyframes orb2 { 0%,100% { transform:translate(0,0) scale(1); } 50% { transform:translate(-30px,40px) scale(1.08); } }
+        @keyframes spin  { to { transform:rotate(360deg); } }
+        .login-input {
+          width:100%; background:#0f0f1c; border:1px solid #2a2a42;
+          border-radius:10px; padding:13px 14px; color:#f0f0ff; font-size:14px;
+          outline:none; transition:border-color .2s, box-shadow .2s;
+        }
+        .login-input:focus { border-color:#6366f1; box-shadow:0 0 0 3px #6366f120; }
+        .login-btn {
+          width:100%; padding:14px; border-radius:10px; border:none;
+          background:linear-gradient(135deg,#6366f1,#a855f7);
+          color:#fff; font-size:14px; font-weight:700; cursor:pointer;
+          transition:opacity .15s, transform .1s;
+          letter-spacing:.3px;
+        }
+        .login-btn:hover:not(:disabled) { opacity:.92; transform:translateY(-1px); }
+        .login-btn:active { transform:translateY(0); }
+        .login-btn:disabled { opacity:.5; cursor:not-allowed; }
+      `}</style>
+
+      {/* Full-page bg */}
+      <div style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", position:"relative", overflow:"hidden", background:"#08080f" }}>
+
+        {/* Ambient orbs */}
+        <div style={{ position:"absolute", width:600, height:600, borderRadius:"50%", background:"radial-gradient(circle,#6366f115 0%,transparent 70%)", top:"-20%", left:"-10%", animation:"orb1 12s ease-in-out infinite", pointerEvents:"none" }}/>
+        <div style={{ position:"absolute", width:500, height:500, borderRadius:"50%", background:"radial-gradient(circle,#a855f712 0%,transparent 70%)", bottom:"-15%", right:"-8%", animation:"orb2 15s ease-in-out infinite", pointerEvents:"none" }}/>
+
+        {/* Grid overlay */}
+        <div style={{ position:"absolute", inset:0, backgroundImage:"linear-gradient(#6366f108 1px,transparent 1px),linear-gradient(90deg,#6366f108 1px,transparent 1px)", backgroundSize:"48px 48px", pointerEvents:"none" }}/>
+
+        {/* Card */}
+        <div style={{ width:420, animation:"fadeUp .35s ease", position:"relative", zIndex:1 }}>
+          <div style={{ background:"rgba(15,15,28,0.95)", border:"1px solid #2a2a42", borderRadius:22, padding:"40px 36px", backdropFilter:"blur(20px)", boxShadow:"0 32px 80px rgba(0,0,0,.6)" }}>
+
+            {/* Logo */}
+            <div style={{ textAlign:"center", marginBottom:32 }}>
+              <div style={{
+                width:60, height:60, borderRadius:18, margin:"0 auto 14px",
+                background:"linear-gradient(135deg,#6366f1,#a855f7)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:28, boxShadow:"0 8px 24px #6366f140",
+              }}>⚡</div>
+              <div style={{ fontSize:24, fontWeight:900, letterSpacing:-.5, color:"#f0f0ff" }}>ApplyAI</div>
+              <div style={{ fontSize:13, color:"#50506a", marginTop:5 }}>Your automated job search command center</div>
+            </div>
+
+            {/* Feature chips */}
+            <div style={{ display:"flex", gap:8, justifyContent:"center", marginBottom:28, flexWrap:"wrap" }}>
+              {["🔍 AI Scoring","🤖 Auto Apply","📊 Pipeline","💳 Billing"].map(f => (
+                <span key={f} style={{ fontSize:11, fontWeight:600, color:"#818cf8", background:"#6366f112", border:"1px solid #6366f125", borderRadius:20, padding:"4px 10px" }}>{f}</span>
+              ))}
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleLogin} style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              <div>
+                <label style={{ display:"block", fontSize:11, color:"#50506a", fontWeight:700, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Username</label>
+                <input
+                  className="login-input"
+                  type="text"
+                  placeholder="admin"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  autoFocus
+                  autoComplete="username"
+                  required
+                />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:11, color:"#50506a", fontWeight:700, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Password</label>
+                <div style={{ position:"relative" }}>
+                  <input
+                    className="login-input"
+                    type={showPass ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    required
+                    style={{ paddingRight:44 }}
+                  />
+                  <button type="button" onClick={() => setShowPass(v => !v)} style={{
+                    position:"absolute", right:12, top:"50%", transform:"translateY(-50%)",
+                    background:"none", border:"none", color:"#50506a", cursor:"pointer", fontSize:16, lineHeight:1,
+                  }}>{showPass ? "🙈" : "👁"}</button>
+                </div>
+              </div>
+
+              {error && (
+                <div style={{ background:"#ef444412", border:"1px solid #ef444430", borderRadius:8, padding:"10px 14px", fontSize:12, color:"#f87171", display:"flex", alignItems:"center", gap:8 }}>
+                  <span>⚠</span>{error}
+                </div>
+              )}
+
+              <button className="login-btn" type="submit" disabled={loading} style={{ marginTop:4 }}>
+                {loading
+                  ? <span style={{ display:"inline-flex", alignItems:"center", gap:8 }}>
+                      <span style={{ width:14, height:14, border:"2px solid #ffffff40", borderTopColor:"#fff", borderRadius:"50%", animation:"spin .7s linear infinite", display:"inline-block" }}/>
+                      Signing in…
+                    </span>
+                  : "Sign in →"
+                }
+              </button>
+            </form>
+
+            {/* Footer */}
+            <div style={{ marginTop:24, textAlign:"center", fontSize:11, color:"#383852", display:"flex", alignItems:"center", justifyContent:"center", gap:12 }}>
+              <span>🔒 Secured</span>
+              <span style={{ color:"#2a2a42" }}>·</span>
+              <span>🏠 Data stays local</span>
+              <span style={{ color:"#2a2a42" }}>·</span>
+              <span>⚡ ApplyAI</span>
+            </div>
+          </div>
+
+          {/* Version hint */}
+          <div style={{ textAlign:"center", marginTop:14, fontSize:11, color:"#2a2a42" }}>
+            Default: <code style={{ color:"#383852" }}>admin</code> / <code style={{ color:"#383852" }}>applyai2024</code> — change in <code style={{ color:"#383852" }}>.env</code>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
+  // ── Auth ────────────────────────────────────────────────────────────────────
+  const [authed, setAuthed] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem("applyai_token");
+    if (!token) { setAuthChecked(true); return; }
+    fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => { if (d.ok) setAuthed(true); else localStorage.removeItem("applyai_token"); })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  const handleLogin  = (token) => { setAuthed(true); };
+  const handleLogout = () => { localStorage.removeItem("applyai_token"); setAuthed(false); };
+
+  // ── App state ───────────────────────────────────────────────────────────────
   const [tab, setTab]                       = useState("dashboard");
   const [foundJobs, setFoundJobs]           = useState([]);
   const [jobSearch, setJobSearch]           = useState("");
@@ -721,7 +1247,7 @@ export default function App() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const d = await fetch(`${API}/status`).then(r => r.json());
+      const d = await apiFetch(`${API}/status`).then(r => r.json());
       setIsRunning(d.isRunning); setStats(d.stats); setSettings(d.settings);
       setSettingsForm(p => p ?? d.settings);
     } catch {}
@@ -729,40 +1255,42 @@ export default function App() {
 
   const fetchApplications = useCallback(async () => {
     try {
-      const d = await fetch(`${API}/applications?limit=500`).then(r => r.json());
+      const d = await apiFetch(`${API}/applications?limit=500`).then(r => r.json());
       setApplications(d.items || []);
     } catch {}
   }, []);
 
   const fetchLogs = useCallback(async () => {
-    try { setLogs(await fetch(`${API}/logs?limit=200`).then(r => r.json())); } catch {}
+    try { setLogs(await apiFetch(`${API}/logs?limit=200`).then(r => r.json())); } catch {}
   }, []);
 
   const fetchFoundJobs = useCallback(async (q="") => {
     try {
-      const d = await fetch(`${API}/jobs?limit=500${q?`&q=${encodeURIComponent(q)}`:"" }`).then(r => r.json());
+      const d = await apiFetch(`${API}/jobs?limit=500${q?`&q=${encodeURIComponent(q)}`:"" }`).then(r => r.json());
       setFoundJobs(d.items || []);
     } catch {}
   }, []);
 
   const fetchPipeline = useCallback(async () => {
     try {
-      const d = await fetch(`${API}/pipeline`).then(r => r.json());
+      const d = await apiFetch(`${API}/pipeline`).then(r => r.json());
       setPipeline(d.stages || {});
     } catch {}
   }, []);
 
   useEffect(() => {
-    fetch(`${API}/ats-companies`).then(r => r.json()).then(setAtsCompanies).catch(() => {});
-  }, []);
+    if (!authed) return;
+    apiFetch(`${API}/ats-companies`).then(r => r.json()).then(setAtsCompanies).catch(() => {});
+  }, [authed]);
 
   useEffect(() => {
+    if (!authed) return;
     fetchStatus(); fetchApplications(); fetchLogs(); fetchFoundJobs(); fetchPipeline();
     const iv = setInterval(() => {
       fetchStatus(); fetchApplications(); fetchLogs(); fetchFoundJobs(jobSearch); fetchPipeline();
     }, 5000);
     return () => clearInterval(iv);
-  }, [fetchStatus, fetchApplications, fetchLogs, fetchFoundJobs, fetchPipeline, jobSearch]);
+  }, [authed, fetchStatus, fetchApplications, fetchLogs, fetchFoundJobs, fetchPipeline, jobSearch]);
 
   useEffect(() => {
     if (tab === "logs") logsEndRef.current?.scrollIntoView({ behavior:"smooth" });
@@ -807,7 +1335,7 @@ export default function App() {
   const toggleAutomation = async () => {
     setLoading(true);
     try {
-      const d = await fetch(`${API}/${isRunning?"stop":"start"}`, { method:"POST" }).then(r => r.json());
+      const d = await apiFetch(`${API}/${isRunning?"stop":"start"}`, { method:"POST" }).then(r => r.json());
       if (d.ok) { setIsRunning(!isRunning); showToast(isRunning ? "Stopped" : "Scanner started!"); }
       else showToast(d.message||"Failed","error");
     } catch { showToast("Cannot reach server","error"); }
@@ -817,13 +1345,13 @@ export default function App() {
   const handleApplyNow = async (job) => {
     setSelectedJob(null);
     showToast(`Auto-applying to ${job.title}…`);
-    try { await fetch(`${API}/apply/${job.id}`, { method:"POST" }); showToast("Auto-apply started!"); }
+    try { await apiFetch(`${API}/apply/${job.id}`, { method:"POST" }); showToast("Auto-apply started!"); }
     catch { showToast("Failed","error"); }
   };
 
   const saveSettings = async () => {
     try {
-      const d = await fetch(`${API}/settings`, {
+      const d = await apiFetch(`${API}/settings`, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify(settingsForm),
       }).then(r => r.json());
@@ -832,13 +1360,13 @@ export default function App() {
   };
 
   const deleteApplication = async (id) => {
-    await fetch(`${API}/applications/${id}`, { method:"DELETE" });
+    await apiFetch(`${API}/applications/${id}`, { method:"DELETE" });
     setApplications(p => p.filter(a => a.id !== id));
   };
 
   const updateStage = async (id, stage) => {
     try {
-      await fetch(`${API}/applications/${id}/stage`, {
+      await apiFetch(`${API}/applications/${id}/stage`, {
         method:"PATCH", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ stage }),
       });
@@ -850,7 +1378,7 @@ export default function App() {
 
   const fetchTalkingPoints = async (job) => {
     try {
-      const d = await fetch(`${API}/generate-answers`, {
+      const d = await apiFetch(`${API}/generate-answers`, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ job }),
       }).then(r => r.json());
@@ -868,6 +1396,20 @@ export default function App() {
     inter:   statusCounts["interviewing"]  || 0,
     offered: statusCounts["offered"]       || 0,
   };
+
+  // ── Auth gate ───────────────────────────────────────────────────────────────
+  if (!authChecked) return (
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"#08080f", gap:16 }}>
+      <div style={{ width:44, height:44, border:"3px solid #2a2a42", borderTopColor:"#6366f1", borderRadius:"50%", animation:"spin .7s linear infinite" }}/>
+      <span style={{ color:"#50506a", fontSize:13, fontFamily:"system-ui" }}>Loading ApplyAI…</span>
+      <style>{`
+        @keyframes spin { to { transform:rotate(360deg); } }
+        *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+        body { background:#08080f; }
+      `}</style>
+    </div>
+  );
+  if (!authed) return <LoginPage onLogin={handleLogin}/>;
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -972,7 +1514,7 @@ export default function App() {
             ))}
 
             {!sidebarCollapsed && <div style={{ fontSize:10, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em", padding:"10px 8px 4px" }}>Jobs</div>}
-            {NAV.slice(2,4).map(item => (
+            {NAV.slice(2,5).map(item => (
               <button key={item.id} className={`nav-btn${tab===item.id?" active":""}`} onClick={() => setTab(item.id)}
                 title={sidebarCollapsed ? item.label : ""}>
                 <span style={{ fontSize:16, flexShrink:0 }}>{item.icon}</span>
@@ -987,15 +1529,25 @@ export default function App() {
                     {applications.length}
                   </span>
                 )}
+                {!sidebarCollapsed && item.id==="agents" && (
+                  <span style={{ marginLeft:"auto", background:"#6366f115", color:"var(--indigo)", borderRadius:10, padding:"1px 7px", fontSize:10, fontWeight:700 }}>
+                    5
+                  </span>
+                )}
               </button>
             ))}
 
             {!sidebarCollapsed && <div style={{ fontSize:10, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em", padding:"10px 8px 4px" }}>System</div>}
-            {NAV.slice(4).map(item => (
+            {NAV.slice(5).map(item => (
               <button key={item.id} className={`nav-btn${tab===item.id?" active":""}`} onClick={() => setTab(item.id)}
                 title={sidebarCollapsed ? item.label : ""}>
                 <span style={{ fontSize:16, flexShrink:0 }}>{item.icon}</span>
                 {!sidebarCollapsed && <span>{item.label}</span>}
+                {!sidebarCollapsed && item.id==="billing" && (
+                  <span style={{ marginLeft:"auto", background:"#6366f115", color:"var(--indigo)", borderRadius:10, padding:"1px 7px", fontSize:10, fontWeight:700 }}>
+                    PRO
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -1072,16 +1624,27 @@ export default function App() {
               </span>
             </div>
 
-            <button onClick={toggleAutomation} disabled={loading} style={{
-              padding:"8px 20px", borderRadius:8, border:"none", cursor: loading ? "not-allowed" : "pointer",
-              fontWeight:700, fontSize:12, opacity: loading ? .6 : 1, letterSpacing:.3,
-              background: isRunning ? "#ef444420" : "#22c55e20",
-              color: isRunning ? "#ef4444" : "#22c55e",
-              border: `1px solid ${isRunning ? "#ef444430" : "#22c55e30"}`,
-              transition:"all .15s",
-            }}>
-              {loading ? "…" : isRunning ? "⏹ Stop Scanner" : "▶ Start Scanner"}
-            </button>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <button onClick={toggleAutomation} disabled={loading} style={{
+                padding:"8px 20px", borderRadius:8, border:"none", cursor: loading ? "not-allowed" : "pointer",
+                fontWeight:700, fontSize:12, opacity: loading ? .6 : 1, letterSpacing:.3,
+                background: isRunning ? "#ef444420" : "#22c55e20",
+                color: isRunning ? "#ef4444" : "#22c55e",
+                borderColor: isRunning ? "#ef444430" : "#22c55e30",
+                borderStyle:"solid", borderWidth:1,
+                transition:"all .15s",
+              }}>
+                {loading ? "…" : isRunning ? "⏹ Stop Scanner" : "▶ Start Scanner"}
+              </button>
+              <button onClick={handleLogout} title="Sign out" style={{
+                padding:"8px 12px", borderRadius:8, border:"1px solid #2a2a42",
+                background:"transparent", color:"#50506a", cursor:"pointer",
+                fontSize:15, lineHeight:1, transition:"all .15s",
+              }}
+                onMouseEnter={e => { e.currentTarget.style.color="#ef4444"; e.currentTarget.style.borderColor="#ef444430"; }}
+                onMouseLeave={e => { e.currentTarget.style.color="#50506a"; e.currentTarget.style.borderColor="#2a2a42"; }}
+              >⏻</button>
+            </div>
           </header>
 
           {/* Content */}
@@ -1495,36 +2058,169 @@ export default function App() {
               </div>
             )}
 
-            {/* ── LOGS ──────────────────────────────────────────────────────── */}
-            {tab==="logs" && (
-              <div style={{
-                background:"#050509", borderRadius:14, padding:"18px 22px",
-                fontFamily:"'JetBrains Mono','Fira Code','Cascadia Code',monospace",
-                fontSize:12, minHeight:400, border:"1px solid var(--border)",
-              }}>
-                {logs.length===0 && <span style={{ color:"var(--text-dim)" }}>No logs yet.</span>}
-                {logs.map(l => (
-                  <div key={l.id} style={{
-                    display:"flex", gap:14, padding:"3px 0",
-                    alignItems:"flex-start", borderBottom:"1px solid #ffffff04",
-                  }}>
-                    <span style={{ color:"#30304a", flexShrink:0, fontSize:11 }}>
-                      {new Date(l.timestamp).toLocaleString()}
-                    </span>
-                    <span style={{ color:LEVEL_COLOR[l.level], width:60, flexShrink:0, fontWeight:700, fontSize:11 }}>
-                      [{l.level.toUpperCase()}]
-                    </span>
-                    <span style={{ color:LEVEL_COLOR[l.level], lineHeight:1.6 }}>{l.message}</span>
-                    {l.detail && <span style={{ color:"#30304a" }}>{l.detail}</span>}
-                  </div>
-                ))}
-                <div ref={logsEndRef}/>
-              </div>
-            )}
+            {/* ── AGENTS ────────────────────────────────────────────────────── */}
+            {tab==="agents" && <AgentsTab showToast={showToast}/>}
+
+            {/* ── ARCHITECTURE ──────────────────────────────────────────────── */}
+            {tab==="architecture" && <ArchDiagram/>}
+
+            {/* ── BILLING ───────────────────────────────────────────────────── */}
+            {tab==="billing" && <BillingTab showToast={showToast}/>}
 
             {/* ── SETTINGS ──────────────────────────────────────────────────── */}
             {tab==="settings" && settingsForm && (
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, alignItems:"start" }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+                {/* User Profile */}
+                <div style={{ background:"var(--surface)", borderRadius:14, padding:22, border:"1px solid #6366f130" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:18 }}>
+                    <Avatar name={settingsForm.profile?.name || "?"} size={44}/>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:15, fontWeight:800, color:"var(--text)" }}>{settingsForm.profile?.name || "Your Name"}</div>
+                      <div style={{ fontSize:11, color:"var(--text-dim)" }}>{(settingsForm.profile?.targetRoles||"").split(",")[0]?.trim() || "Job Seeker"}</div>
+                    </div>
+                    {(() => {
+                      const pct = profileCompleteness(settingsForm.profile||{});
+                      return <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:11, color:pct===100?"#22c55e":"#f59e0b", fontWeight:700 }}>{pct}% complete</span>
+                        <div style={{ width:70, height:5, background:"var(--border)", borderRadius:3, overflow:"hidden" }}>
+                          <div style={{ height:"100%", width:`${pct}%`, background:pct===100?"#22c55e":"#6366f1", borderRadius:3 }}/>
+                        </div>
+                      </div>;
+                    })()}
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:12 }}>
+                    <Field label="Full Name">
+                      <input value={settingsForm.profile?.name||""} placeholder="Jane Smith"
+                        onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,name:e.target.value}}))}/>
+                    </Field>
+                    <Field label="Email">
+                      <input type="email" value={settingsForm.profile?.email||""} placeholder="jane@email.com"
+                        onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,email:e.target.value}}))}/>
+                    </Field>
+                    <Field label="Phone">
+                      <input value={settingsForm.profile?.phone||""} placeholder="+1 555 000 0000"
+                        onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,phone:e.target.value}}))}/>
+                    </Field>
+                    <Field label="Location">
+                      <input value={settingsForm.profile?.location||""} placeholder="San Francisco, CA"
+                        onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,location:e.target.value}}))}/>
+                    </Field>
+                    <Field label="Years Experience">
+                      <input type="number" min={0} max={40} value={settingsForm.profile?.yearsExperience||""}
+                        onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,yearsExperience:e.target.value}}))}/>
+                    </Field>
+                    <Field label="School">
+                      <input value={settingsForm.profile?.school||""} placeholder="MIT, Stanford…"
+                        onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,school:e.target.value}}))}/>
+                    </Field>
+                  </div>
+                  <Field label="Target Roles (comma-separated)">
+                    <input value={settingsForm.profile?.targetRoles||""} placeholder="Data Scientist, ML Engineer"
+                      onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,targetRoles:e.target.value}}))}/>
+                  </Field>
+                  <Field label="Skills (comma-separated — powers AI scorer)">
+                    <textarea rows={3}
+                      value={Array.isArray(settingsForm.profile?.skills)?settingsForm.profile.skills.join(", "):(settingsForm.profile?.skills||"")}
+                      placeholder="Python, SQL, PyTorch, AWS, LLM…"
+                      onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,skills:e.target.value}}))}
+                      onBlur={e=>setSettingsForm(f=>({...f,profile:{...f.profile,skills:e.target.value.split(",").map(s=>s.trim()).filter(Boolean)}}))}/>
+                  </Field>
+                  <Field label="Professional Summary">
+                    <textarea rows={3} value={settingsForm.profile?.summary||""} placeholder="Results-driven engineer with 5+ years…"
+                      onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,summary:e.target.value}}))}/>
+                  </Field>
+
+                  {/* ── EDUCATION ─────────────────────────────────────────── */}
+                  <div style={{ marginBottom:14 }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                      <label style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em" }}>🎓 Education</label>
+                      <button onClick={() => setSettingsForm(f => {
+                        const edu = [...(f.profile?.education || []), { school:"", degree:"", major:"", startYear:"", endYear:"", gpa:"", current:false }];
+                        return {...f, profile:{...f.profile, education: edu}};
+                      })} style={{ fontSize:11, fontWeight:700, color:"var(--indigo)", background:"#6366f112", border:"1px solid #6366f130", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>+ Add</button>
+                    </div>
+                    {(settingsForm.profile?.education||[]).map((edu, i) => (
+                      <div key={i} style={{ background:"var(--bg)", borderRadius:10, padding:14, border:"1px solid var(--border)", marginBottom:10, position:"relative" }}>
+                        <button onClick={() => setSettingsForm(f => {
+                          const arr = [...(f.profile?.education||[])]; arr.splice(i,1);
+                          return {...f, profile:{...f.profile, education:arr}};
+                        })} style={{ position:"absolute", top:10, right:10, background:"none", border:"none", color:"#50506a", cursor:"pointer", fontSize:14, lineHeight:1 }}
+                          onMouseEnter={e=>e.currentTarget.style.color="#ef4444"}
+                          onMouseLeave={e=>e.currentTarget.style.color="#50506a"}>✕</button>
+                        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr", gap:10, marginBottom:8 }}>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>School</label>
+                            <input value={edu.school||""} placeholder="MIT, Stanford…" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.education||[])];a[i]={...a[i],school:e.target.value};return{...f,profile:{...f.profile,education:a}};})}/>
+                          </div>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>Start Year</label>
+                            <input value={edu.startYear||""} placeholder="2018" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.education||[])];a[i]={...a[i],startYear:e.target.value};return{...f,profile:{...f.profile,education:a}};})}/>
+                          </div>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>End Year</label>
+                            <input value={edu.endYear||""} placeholder="2022 or Present" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.education||[])];a[i]={...a[i],endYear:e.target.value};return{...f,profile:{...f.profile,education:a}};})}/>
+                          </div>
+                        </div>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>Degree</label>
+                            <input value={edu.degree||""} placeholder="B.S., M.S., Ph.D." onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.education||[])];a[i]={...a[i],degree:e.target.value};return{...f,profile:{...f.profile,education:a}};})}/>
+                          </div>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>Major / Field</label>
+                            <input value={edu.major||""} placeholder="Computer Science" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.education||[])];a[i]={...a[i],major:e.target.value};return{...f,profile:{...f.profile,education:a}};})}/>
+                          </div>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>GPA (optional)</label>
+                            <input value={edu.gpa||""} placeholder="3.9 / 4.0" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.education||[])];a[i]={...a[i],gpa:e.target.value};return{...f,profile:{...f.profile,education:a}};})}/>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {!(settingsForm.profile?.education||[]).length && (
+                      <div style={{ fontSize:12, color:"var(--text-dim)", padding:"10px 14px", background:"var(--bg)", borderRadius:8, border:"1px dashed var(--border)", textAlign:"center" }}>No education added — click + Add</div>
+                    )}
+                  </div>
+
+                  {/* ── EXPERIENCE ────────────────────────────────────────── */}
+                  <div style={{ marginBottom:14 }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                      <label style={{ fontSize:11, color:"var(--text-dim)", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em" }}>💼 Work Experience</label>
+                      <button onClick={() => setSettingsForm(f => {
+                        const exp = [...(f.profile?.experiences || []), { company:"", title:"", startDate:"", endDate:"", current:false, description:"" }];
+                        return {...f, profile:{...f.profile, experiences: exp}};
+                      })} style={{ fontSize:11, fontWeight:700, color:"var(--indigo)", background:"#6366f112", border:"1px solid #6366f130", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>+ Add</button>
+                    </div>
+                    {(settingsForm.profile?.experiences||[]).map((exp, i) => (
+                      <div key={i} style={{ background:"var(--bg)", borderRadius:10, padding:14, border:"1px solid var(--border)", marginBottom:10, position:"relative" }}>
+                        <button onClick={() => setSettingsForm(f => {
+                          const arr = [...(f.profile?.experiences||[])]; arr.splice(i,1);
+                          return {...f, profile:{...f.profile, experiences:arr}};
+                        })} style={{ position:"absolute", top:10, right:10, background:"none", border:"none", color:"#50506a", cursor:"pointer", fontSize:14, lineHeight:1 }}
+                          onMouseEnter={e=>e.currentTarget.style.color="#ef4444"}
+                          onMouseLeave={e=>e.currentTarget.style.color="#50506a"}>✕</button>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:8 }}>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>Company</label>
+                            <input value={exp.company||""} placeholder="Amazon, Google…" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.experiences||[])];a[i]={...a[i],company:e.target.value};return{...f,profile:{...f.profile,experiences:a}};})}/>
+                          </div>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>Job Title</label>
+                            <input value={exp.title||""} placeholder="Data Scientist" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.experiences||[])];a[i]={...a[i],title:e.target.value};return{...f,profile:{...f.profile,experiences:a}};})}/>
+                          </div>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>Start Date</label>
+                            <input value={exp.startDate||""} placeholder="Jan 2021" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.experiences||[])];a[i]={...a[i],startDate:e.target.value};return{...f,profile:{...f.profile,experiences:a}};})}/>
+                          </div>
+                          <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>End Date</label>
+                            <input value={exp.endDate||""} placeholder="Dec 2023 or Present" onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.experiences||[])];a[i]={...a[i],endDate:e.target.value};return{...f,profile:{...f.profile,experiences:a}};})}/>
+                          </div>
+                        </div>
+                        <div className="fc"><label style={{fontSize:10,color:"var(--text-dim)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",display:"block",marginBottom:4}}>Responsibilities & Achievements</label>
+                          <textarea rows={3} value={exp.description||""} placeholder="• Built ML pipeline processing 10M events/day&#10;• Reduced model latency by 40% with quantization&#10;• Led team of 3 engineers…"
+                            onChange={e=>setSettingsForm(f=>{const a=[...(f.profile?.experiences||[])];a[i]={...a[i],description:e.target.value};return{...f,profile:{...f.profile,experiences:a}};})}/>
+                        </div>
+                      </div>
+                    ))}
+                    {!(settingsForm.profile?.experiences||[]).length && (
+                      <div style={{ fontSize:12, color:"var(--text-dim)", padding:"10px 14px", background:"var(--bg)", borderRadius:8, border:"1px dashed var(--border)", textAlign:"center" }}>No experience added — click + Add</div>
+                    )}
+                  </div>
+
+                  <button onClick={saveSettings} style={{ padding:"10px 24px", borderRadius:8, border:"none", background:"var(--indigo)", color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer" }}>💾 Save Profile & Settings</button>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, alignItems:"start" }}>
                 <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
                   {/* Search settings */}
                   <div style={{ background:"var(--surface)", borderRadius:14, padding:22, border:"1px solid var(--border)" }}>
@@ -1585,7 +2281,7 @@ export default function App() {
                         color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer",
                       }}>Save Settings</button>
                       <button onClick={async () => {
-                        const d = await fetch(`${API}/test-email`,{method:"POST"}).then(r=>r.json());
+                        const d = await apiFetch(`${API}/test-email`,{method:"POST"}).then(r=>r.json());
                         showToast(d.ok?"Test email sent!":d.message, d.ok?"success":"error");
                       }} style={{
                         padding:"9px 18px", borderRadius:8, border:"1px solid var(--border)",
@@ -1645,6 +2341,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
+                </div>
                 </div>
               </div>
             )}

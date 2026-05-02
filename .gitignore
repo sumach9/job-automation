@@ -11,3 +11,6 @@ client/client_new.log
 *.log
 .DS_Store
 logs/
+screenshots/
+*.clean
+server.js.clean

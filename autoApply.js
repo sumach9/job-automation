@@ -56,8 +56,8 @@ export async function smartApply({ job, credentials, profile, resumePath }) {
     return applyIndeed({ jobUrl: applyUrl, credentials, profile, resumePath });
   }
   // For all other platforms (Greenhouse, Lever, Ashby, Workday, Glassdoor, etc.)
-  // Open in Chrome with Simplify extension — it auto-fills every form field
-  return openWithSimplify(applyUrl, job);
+  // Fill the form directly with Playwright using the user's profile
+  return openWithSimplify(applyUrl, job, profile);
 }
 
 // ─── LinkedIn Easy Apply ──────────────────────────────────────────────────────
@@ -305,144 +305,222 @@ const IS_SERVER = !!(
   process.env.RAILWAY_ENVIRONMENT ||
   process.env.RENDER ||
   process.env.FLY_APP_NAME ||
-  process.env.DYNO ||                // Heroku
-  (process.env.PORT && !process.env.LOCALAPPDATA)  // generic server heuristic
+  process.env.DYNO ||
+  (process.env.PORT && !process.env.LOCALAPPDATA)
 );
 
-// ─── Simplify integration ─────────────────────────────────────────────────────
-// Opens job in Chrome with Simplify extension active.
-// Simplify auto-fills every form field (Workday, Greenhouse, Lever, Ashby, etc.)
-// Two modes controlled by SIMPLIFY_MODE env var:
-//   "playwright" — Playwright controls Chrome, can optionally auto-submit
-//   "shell"      — Opens in existing Chrome window (default, most reliable)
-//   "off"        — Disabled (queued for manual review)
-async function openWithSimplify(url, job) {
+// ─── Direct ATS form filler (no Simplify needed) ─────────────────────────────
+// Fills Greenhouse / Lever / Ashby forms directly using the user's profile data.
+async function fillATSForm(page, profile, resumePath, atsProvider = "") {
+  await delay(3000, 1000); // wait for page to fully render
+
+  const p = profile || {};
+  const firstName = p.firstName || (p.name || "").split(" ")[0] || "";
+  const lastName  = p.lastName  || (p.name || "").split(" ").slice(1).join(" ") || "";
+
+  // Use most recent education entry as primary school/degree
+  const primaryEdu = Array.isArray(p.education) && p.education.length
+    ? p.education[0]
+    : null;
+  const schoolName  = primaryEdu?.school  || p.school  || "";
+  const degreeName  = primaryEdu?.degree  || p.degree  || "";
+  const majorName   = primaryEdu?.major   || p.major   || "";
+  const gpaValue    = primaryEdu?.gpa     || "";
+
+  // Most recent job title and company for "current role" questions
+  const latestExp   = Array.isArray(p.experiences) && p.experiences.length ? p.experiences[0] : null;
+  const currentTitle   = latestExp?.title   || p.targetRoles?.split(",")[0]?.trim() || "";
+  const currentCompany = latestExp?.company || "";
+
+  // ── Upload resume ────────────────────────────────────────────────────────
+  if (resumePath && fs.existsSync(resumePath)) {
+    const fileInput = page.locator("input[type='file']").first();
+    if (await isVisible(fileInput)) {
+      await fileInput.setInputFiles(resumePath).catch(() => {});
+      await delay(2500, 500);
+    }
+  }
+
+  // ── Generic field map ─────────────────────────────────────────────────────
+  const fieldMap = [
+    { selectors: ["input[name*='first_name']", "input[id*='first_name']", "input[placeholder*='First']", "input[autocomplete='given-name']"],   value: firstName },
+    { selectors: ["input[name*='last_name']",  "input[id*='last_name']",  "input[placeholder*='Last']",  "input[autocomplete='family-name']"],   value: lastName  },
+    { selectors: ["input[name='name']", "input[id*='full_name']", "input[placeholder*='Full name']", "input[autocomplete='name']"],              value: p.name || "" },
+    { selectors: ["input[type='email']", "input[name='email']", "input[id*='email']"],                                                          value: p.email || "" },
+    { selectors: ["input[type='tel']",   "input[name*='phone']", "input[id*='phone']", "input[placeholder*='Phone']"],                          value: p.phone || "" },
+    { selectors: ["input[name*='location']", "input[id*='location']", "input[placeholder*='City']", "input[placeholder*='Location']"],          value: p.location || "" },
+    { selectors: ["input[name*='linkedin']", "input[placeholder*='LinkedIn']", "input[id*='linkedin']"],                                         value: p.linkedinUrl || "" },
+    { selectors: ["input[name*='website']",  "input[placeholder*='Website']",  "input[placeholder*='Portfolio']"],                              value: p.website || "" },
+    { selectors: ["input[name*='github']",   "input[placeholder*='GitHub']"],                                                                   value: p.github || "" },
+    { selectors: ["input[name*='school']",  "input[id*='school']",  "input[placeholder*='School']",  "input[placeholder*='University']"],         value: schoolName },
+    { selectors: ["input[name*='degree']",  "input[id*='degree']",  "input[placeholder*='Degree']"],                                               value: degreeName },
+    { selectors: ["input[name*='major']",   "input[id*='major']",   "input[placeholder*='Field of study']", "input[placeholder*='Major']"],        value: majorName  },
+    { selectors: ["input[name*='gpa']",     "input[id*='gpa']",     "input[placeholder*='GPA']"],                                                  value: gpaValue   },
+    { selectors: ["input[name*='current_title']", "input[placeholder*='Current title']", "input[placeholder*='Current role']"],                    value: currentTitle },
+    { selectors: ["input[name*='current_company']","input[placeholder*='Current company']","input[placeholder*='Employer']"],                      value: currentCompany },
+    { selectors: ["input[name*='years']", "input[id*='years_experience']", "input[placeholder*='Years of experience']"],                           value: String(p.yearsExperience || "") },
+  ];
+
+  for (const { selectors, value } of fieldMap) {
+    if (!value) continue;
+    for (const sel of selectors) {
+      const el = page.locator(sel).first();
+      if (await isVisible(el)) {
+        const current = await el.inputValue().catch(() => "");
+        if (!current) await el.fill(value).catch(() => {});
+        break;
+      }
+    }
+  }
+
+  // ── Textareas (cover letter / summary / experience) ──────────────────────
+  // Build experience text block from structured experiences array
+  const expBlock = Array.isArray(p.experiences) && p.experiences.length
+    ? p.experiences.map(e =>
+        `${e.title || ""}${e.company ? " at " + e.company : ""}${e.startDate ? " (" + e.startDate + " – " + (e.endDate || "Present") + ")" : ""}` +
+        (e.description ? "\n" + e.description : "")
+      ).join("\n\n")
+    : "";
+
+  for (const ta of await page.locator("textarea:visible").all()) {
+    const lbl = await labelFor(ta);
+    const current = await ta.inputValue().catch(() => "");
+    if (current) continue;
+    if (/cover|letter|why|interest/i.test(lbl) && p.coverLetter) {
+      await ta.fill(p.coverLetter).catch(() => {});
+    } else if (/summary|about|background/i.test(lbl) && p.summary) {
+      await ta.fill(p.summary).catch(() => {});
+    } else if (/experience|work history|employment/i.test(lbl) && expBlock) {
+      await ta.fill(expBlock).catch(() => {});
+    }
+  }
+
+  // ── Yes/No radios — default Yes (authorized to work, etc.) ───────────────
+  for (const radio of await page.locator("label:has-text('Yes')").all()) {
+    if (await isVisible(radio)) await radio.click().catch(() => {});
+  }
+
+  // ── Dropdowns ─────────────────────────────────────────────────────────────
+  for (const sel of await page.locator("select:visible").all()) {
+    const current = await sel.inputValue().catch(() => "");
+    if (current) continue;
+    const lbl = await labelFor(sel);
+    if (/country/i.test(lbl))   await sel.selectOption({ label: "United States" }).catch(() => {});
+    else if (/auth|work/i.test(lbl)) await sel.selectOption({ index: 1 }).catch(() => {});
+  }
+
+  await delay(800, 200);
+}
+
+// ─── Multi-step form navigator ────────────────────────────────────────────────
+async function navigateAndSubmit(page, profile, resumePath, atsProvider = "") {
+  const SUBMIT_SELECTORS = [
+    "button[type='submit']:visible",
+    "button:has-text('Submit application'):visible",
+    "button:has-text('Submit my application'):visible",
+    "button:has-text('Submit'):visible",
+    "button:has-text('Send application'):visible",
+    "input[type='submit']:visible",
+  ].join(", ");
+
+  const NEXT_SELECTORS = [
+    "button:has-text('Next'):visible",
+    "button:has-text('Continue'):visible",
+    "button:has-text('Next step'):visible",
+    "button[aria-label*='Next']:visible",
+  ].join(", ");
+
+  for (let step = 0; step < 12; step++) {
+    await fillATSForm(page, profile, resumePath, atsProvider);
+
+    const submitBtn = page.locator(SUBMIT_SELECTORS).first();
+    if (await isVisible(submitBtn)) {
+      await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await submitBtn.click();
+      await delay(2500, 500);
+      return { submitted: true };
+    }
+
+    const nextBtn = page.locator(NEXT_SELECTORS).first();
+    if (await isVisible(nextBtn)) {
+      await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await nextBtn.click();
+      await delay(1800, 400);
+    } else {
+      break; // no Next or Submit found
+    }
+  }
+  return { submitted: false };
+}
+
+// ─── Apply to ATS job via Playwright (no Simplify needed) ─────────────────────
+async function openWithSimplify(url, job, profile) {
   if (!url) return { success: false, reason: "No URL available" };
 
-  // On cloud servers, shell mode makes no sense — auto-upgrade to playwright
   let mode = process.env.SIMPLIFY_MODE || "shell";
   if (IS_SERVER && mode === "shell") mode = "playwright";
   const autoSubmit = process.env.SIMPLIFY_AUTO_SUBMIT === "true";
 
-  // ── Off mode: just queue for manual review ────────────────────────────────
+  // ── Off mode: queue for manual review ─────────────────────────────────────
   if (mode === "off") {
-    return { success: false, reason: "Simplify disabled — queued for manual apply", autoApplied: false };
+    return { success: false, reason: "Auto-apply disabled — queued for manual apply", autoApplied: false };
   }
 
-  // ── Shell mode: open in running Chrome where Simplify is already active ──────
+  // ── Shell mode: open in running Chrome (user submits manually) ────────────
   if (mode === "shell") {
     try {
-      if (process.platform === "win32") {
-        await execAsync(`start "" "${url}"`);
-      } else if (process.platform === "darwin") {
-        await execAsync(`open -a "Google Chrome" "${url}"`);
-      } else {
-        await execAsync(`google-chrome "${url}" 2>/dev/null || xdg-open "${url}"`);
-      }
-      return {
-        success: false,
-        reason: "Opened in Chrome — Simplify will auto-fill all fields",
-        browserOpened: true,
-        simplifyUsed: true,
-        autoApplied: false,
-      };
+      if (process.platform === "win32") await execAsync(`start "" "${url}"`);
+      else if (process.platform === "darwin") await execAsync(`open -a "Google Chrome" "${url}"`);
+      else await execAsync(`google-chrome "${url}" 2>/dev/null || xdg-open "${url}"`);
+      return { success: false, reason: "Opened in Chrome — fill and submit manually", browserOpened: true, simplifyUsed: true, autoApplied: false };
     } catch (err) {
       return { success: false, reason: `Could not open Chrome: ${err.message}` };
     }
   }
 
-  // ── Playwright mode: launch Chrome with Simplify extension loaded ─────────────
+  // ── Playwright mode: launch headless Chromium, fill form directly, submit ────
   try {
     if (!_simplifyContext) {
-      // Find Simplify extension in user's Chrome profile
-      const chromeExtDir = path.join(
-        os.homedir(),
-        "AppData", "Local", "Google", "Chrome", "User Data",
-        "Default", "Extensions",
-        "pbanhockgagggenencehbnadejlgchfc"
-      );
-
-      const extensionArgs = [];
-      if (fs.existsSync(chromeExtDir)) {
-        // Load from installed Chrome extension directory
-        const versions = fs.readdirSync(chromeExtDir).sort().reverse();
-        const extPath = path.join(chromeExtDir, versions[0]);
-        extensionArgs.push(
-          `--disable-extensions-except=${extPath}`,
-          `--load-extension=${extPath}`
-        );
-      }
-
-      // Use a dedicated automation profile to avoid conflicting with user's Chrome
-      const automationProfile = path.join(
-        os.homedir(),
-        "AppData", "Local", "Google", "Chrome", "User Data", "Automation"
-      );
-
-      _simplifyContext = await chromium.launchPersistentContext(automationProfile, {
-        channel: "chrome",
-        headless: false,
-        slowMo: 400,
-        args: [
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--start-maximized",
-          ...extensionArgs,
-        ],
+      const browser = await getBrowser(); // reuse shared headless Chromium
+      _simplifyContext = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       });
     }
 
     const page = await _simplifyContext.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
 
-    // Give Simplify time to detect the form and fill all fields
-    await delay(5000, 1000);
+    // Detect ATS provider from URL
+    const atsHint = url.includes("greenhouse") ? "greenhouse"
+      : url.includes("lever.co")   ? "lever"
+      : url.includes("ashbyhq")    ? "ashby"
+      : url.includes("workday")    ? "workday"
+      : "other";
 
     if (autoSubmit) {
-      // Try to find and click the final Submit button
-      const submitBtn = page.locator([
-        "button[aria-label*='Submit']:visible",
-        "button:has-text('Submit application'):visible",
-        "button:has-text('Submit my application'):visible",
-        "button:has-text('Submit'):visible",
-        "input[type='submit']:visible",
-      ].join(", ")).first();
-
-      if (await isVisible(submitBtn)) {
-        await submitBtn.click();
-        await delay(2000);
-        return {
-          success: true,
-          reason: "Submitted via Simplify auto-fill + auto-submit",
-          autoApplied: true,
-          simplifyUsed: true,
-        };
+      const { submitted } = await navigateAndSubmit(page, profile, (profile || {}).resumePath, atsHint);
+      if (submitted) {
+        await page.close().catch(() => {});
+        return { success: true, reason: `Auto-filled and submitted (${atsHint})`, autoApplied: true };
       }
+      // Form filled but submit not found — leave page open for user
+      return { success: false, reason: `Form filled (${atsHint}) — could not find Submit button, left open`, browserOpened: true, autoApplied: false };
     }
 
-    // Leave open for user to review and click Submit
-    return {
-      success: false,
-      reason: "Opened in Chrome with Simplify — form pre-filled, click Submit to finish",
-      browserOpened: true,
-      simplifyUsed: true,
-      autoApplied: false,
-    };
+    // autoSubmit=false — just fill the form and leave it open
+    await fillATSForm(page, profile, (profile || {}).resumePath, atsHint);
+    return { success: false, reason: `Form pre-filled (${atsHint}) — click Submit to finish`, browserOpened: true, autoApplied: false };
 
   } catch (err) {
-    // Playwright mode failed — fall back to shell open
     _simplifyContext = null;
+    // Fallback: open in shell Chrome
     try {
       if (process.platform === "win32") await execAsync(`start "" "${url}"`);
       else await execAsync(`open "${url}"`);
-      return {
-        success: false,
-        reason: "Chrome opened via fallback — Simplify will auto-fill",
-        browserOpened: true,
-        simplifyUsed: true,
-      };
+      return { success: false, reason: `Playwright failed (${err.message}) — opened in Chrome`, browserOpened: true };
     } catch {
-      return { success: false, reason: `Simplify open failed: ${err.message}` };
+      return { success: false, reason: `Could not apply: ${err.message}` };
     }
   }
 }
