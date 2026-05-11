@@ -352,29 +352,27 @@ async function scrapeGoogleJobs(title, location) {
     });
 
     const jobs = data.jobs_results || [];
-    return jobs.map((r) => ({
+    return jobs.map((r) => {
+      // apply_options = actual job-board apply links (LinkedIn, Indeed, company portal)
+      // related_links = company website / Google links — do NOT use for applying
+      const applyOptions = (r.apply_options || []).filter(
+        (l) => l.link && !l.link.includes("google.com")
+      );
+      const bestApplyUrl =
+        applyOptions.find((l) => l.link.includes("linkedin.com"))?.link ||
+        applyOptions.find((l) => l.link.includes("indeed.com"))?.link ||
+        applyOptions.find((l) => l.link.includes("glassdoor.com"))?.link ||
+        applyOptions.find((l) => l.is_direct)?.link ||   // company's own site
+        applyOptions[0]?.link || "";
+
+      return {
       id: `gj-${r.job_id || Date.now() + Math.random()}`,
       title: r.title || title,
       company: r.company_name || "Unknown",
       location: r.location || location,
-      url: (() => {
-        // Prefer LinkedIn or Indeed links for auto-apply, else first available
-        const links = r.related_links || [];
-        return (
-          links.find((l) => l.link?.includes("linkedin.com"))?.link ||
-          links.find((l) => l.link?.includes("indeed.com"))?.link ||
-          links[0]?.link || r.share_link || ""
-        );
-      })(),
-      applyUrl: (() => {
-        const links = r.related_links || [];
-        return (
-          links.find((l) => l.link?.includes("linkedin.com"))?.link ||
-          links.find((l) => l.link?.includes("indeed.com"))?.link ||
-          links[0]?.link || r.share_link || ""
-        );
-      })(),
-      easyApply: (r.related_links || []).some((l) => l.link?.includes("linkedin.com")),
+      url:      bestApplyUrl,
+      applyUrl: bestApplyUrl,
+      easyApply: applyOptions.some((l) => l.link.includes("linkedin.com")),
       postedAt: r.detected_extensions?.posted_at
         ? new Date(Date.now() - parsePostedAt(r.detected_extensions.posted_at)).toISOString()
         : new Date().toISOString(),
@@ -385,7 +383,8 @@ async function scrapeGoogleJobs(title, location) {
       salary: r.detected_extensions?.salary || "",
       workMode: r.detected_extensions?.work_from_home ? "Remote" : "",
       jobType: r.detected_extensions?.schedule_type || "",
-    }));
+      };
+    });
   } catch (err) {
     log("error", `Google Jobs scrape failed — ${title}`, err.message);
     stats.errors++;
