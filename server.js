@@ -9,7 +9,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import jwt from "jsonwebtoken";
-import { smartApply, detectPlatform, resetSession } from "./autoApply.js";
+import { smartApply, detectPlatform, resetSession, scrapeLinkedInEasyApply } from "./autoApply.js";
 import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES, ATS_COMPANY_COUNT } from "./atsScrapers.js";
 import { scoreJob, scoreLabel, scoreColor } from "./scorer.js";
 import { generateViralImage } from "./imageGen.js";
@@ -533,18 +533,21 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
 
         if (autoApplyResult.success) {
           status = "auto-applied";
-          log("success", `✅ Auto-applied: ${job.title} @ ${job.company}`, autoApplyResult.reason);
+          log("success", `✅ Auto-applied: ${job.title} @ ${job.company} [${job.platform}]`, autoApplyResult.reason);
+        } else if (autoApplyResult.autoApplied) {
+          status = "auto-applied";
+          log("success", `✅ Submitted: ${job.title} @ ${job.company}`, autoApplyResult.reason);
         } else if (autoApplyResult.simplifyUsed && autoApplyResult.browserOpened) {
           status = "simplify-opened";
           browserOpensThisCycle++;
-          log("info", `Simplify opened (${browserOpensThisCycle}/${maxBrowserOpens}): ${job.title} @ ${job.company}`);
+          log("info", `Form pre-filled, awaiting manual submit (${browserOpensThisCycle}/${maxBrowserOpens}): ${job.title} @ ${job.company}`);
         } else if (autoApplyResult.browserOpened) {
           status = "browser-opened";
           browserOpensThisCycle++;
-          log("info", `Browser opened (${browserOpensThisCycle}/${maxBrowserOpens}): ${job.title} @ ${job.company}`);
+          log("info", `Form filled, needs manual submit: ${job.title} @ ${job.company} — ${autoApplyResult.reason}`);
         } else {
           status = "apply-failed";
-          log("warning", `Auto-apply failed: ${job.title} @ ${job.company}`, autoApplyResult.reason);
+          log("warning", `Apply failed: ${job.title} @ ${job.company} — ${autoApplyResult.reason}`);
         }
       }
     } catch (err) {
@@ -655,7 +658,6 @@ async function runCycle() {
         const applied = await applyToJob(job, { maxBrowserOpens });
         if (applied) {
           newThisCycle++;
-          log("success", `Queued: ${job.title} @ ${job.company} [${job.platform}]`, job.location);
         } else {
           stats.skipped++;
         }
@@ -663,7 +665,32 @@ async function runCycle() {
     }
   }
 
-  // ── 2. ATS Direct scraping (Greenhouse / Lever / Ashby) ──
+  // ── 2. LinkedIn Easy Apply Direct ──────────────────────────────────────────
+  if (settings.linkedinEmail && settings.linkedinPassword && settings.platforms?.linkedin !== false) {
+    log("info", "LinkedIn Direct: scanning for Easy Apply jobs…");
+    try {
+      const liJobs = await scrapeLinkedInEasyApply(
+        { linkedinEmail: settings.linkedinEmail, linkedinPassword: settings.linkedinPassword },
+        settings.jobTitles,
+        settings.locations,
+        30
+      );
+      const newLi = liJobs.filter(j => !seenUrls.has(j.url));
+      log("info", `LinkedIn Direct: found ${newLi.length} Easy Apply jobs`);
+      stats.found += newLi.length;
+      for (const job of newLi) {
+        saveFoundJob(job);
+        const applied = await applyToJob(job, { maxBrowserOpens });
+        if (applied) newThisCycle++;
+        else stats.skipped++;
+      }
+    } catch (err) {
+      log("error", "LinkedIn Direct scrape failed", err.message);
+      stats.errors++;
+    }
+  }
+
+  // ── 3. ATS Direct scraping (Greenhouse / Lever / Ashby) ──
   if (settings.platforms.atsDirect !== false) {
     log("info", `ATS Direct: scanning ${ATS_COMPANY_COUNT} companies (Greenhouse, Lever, Ashby)…`);
     try {
@@ -675,7 +702,6 @@ async function runCycle() {
         const applied = await applyToJob(job, { maxBrowserOpens });
         if (applied) {
           newThisCycle++;
-          log("success", `Queued (ATS): ${job.title} @ ${job.company}`, job.atsProvider);
         } else {
           stats.skipped++;
         }
@@ -707,16 +733,128 @@ async function runCycle() {
   }
 }
 
+// ─── Daily Digest Email ──────────────────────────────────────────────────────
+async function sendDailyDigest() {
+  if (!settings.emailNotifications) return;
+  const notifyTo = settings.notifyEmail || process.env.NOTIFY_EMAIL;
+  if (!notifyTo) return;
+
+  const top = [...foundJobs]
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, 15);
+
+  if (top.length === 0) {
+    log("info", "Daily digest: no jobs to send yet");
+    return;
+  }
+
+  const autoApplied = applications.filter(a => a.status === "auto-applied").length;
+  const interviewing = applications.filter(a => a.status === "interviewing").length;
+
+  const scoreColor = (s) =>
+    s >= 3.5 ? "#16a34a" : s >= 2.5 ? "#d97706" : "#dc2626";
+
+  const jobRows = top.map(j => `
+    <tr style="border-bottom:1px solid #f0eeec;">
+      <td style="padding:12px 16px;">
+        <div style="font-weight:600;color:#1c1917;font-size:14px;">${j.title}</div>
+        <div style="color:#78716c;font-size:12px;margin-top:2px;">${j.company} · ${j.location || "—"}</div>
+      </td>
+      <td style="padding:12px 16px;white-space:nowrap;">
+        <span style="background:${scoreColor(j.score)}18;color:${scoreColor(j.score)};border:1px solid ${scoreColor(j.score)}30;border-radius:6px;padding:3px 9px;font-size:12px;font-weight:700;">${j.score ?? "—"}</span>
+      </td>
+      <td style="padding:12px 16px;">
+        <span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:2px 8px;font-size:11px;">${j.platform || "—"}</span>
+        ${j.easyApply ? '<span style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:4px;padding:2px 8px;font-size:11px;margin-left:4px;">Easy Apply</span>' : ""}
+      </td>
+      <td style="padding:12px 16px;">
+        <a href="${j.url}" style="background:#1c1917;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;text-decoration:none;">Apply →</a>
+      </td>
+    </tr>`).join("");
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <body style="margin:0;padding:0;background:#fafaf9;font-family:'Helvetica Neue',Arial,sans-serif;">
+      <div style="max-width:640px;margin:32px auto;background:#fff;border-radius:16px;border:1px solid #e5e3e0;overflow:hidden;">
+
+        <!-- Header -->
+        <div style="background:#1c1917;padding:28px 32px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="background:#fff;border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:18px;">⚡</div>
+            <span style="color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.5px;">JobPilot Daily Digest</span>
+          </div>
+          <div style="color:#a8a29e;font-size:13px;margin-top:8px;">${new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+        </div>
+
+        <!-- Stats bar -->
+        <div style="display:flex;background:#fafaf9;border-bottom:1px solid #f0eeec;">
+          ${[
+            ["Jobs Found", foundJobs.length, "#2563eb"],
+            ["Auto-Applied", autoApplied, "#16a34a"],
+            ["Interviewing", interviewing, "#0891b2"],
+            ["Hot Matches", top.filter(j=>j.score>=3.5).length, "#d97706"],
+          ].map(([lbl,val,c]) => `
+            <div style="flex:1;padding:16px;text-align:center;border-right:1px solid #f0eeec;">
+              <div style="font-size:22px;font-weight:700;color:${c};">${val}</div>
+              <div style="font-size:11px;color:#a8a29e;text-transform:uppercase;letter-spacing:0.06em;margin-top:3px;">${lbl}</div>
+            </div>`).join("")}
+        </div>
+
+        <!-- Section header -->
+        <div style="padding:20px 24px 8px;">
+          <div style="font-size:13px;font-weight:700;color:#1c1917;">Top ${top.length} Job Matches Today</div>
+          <div style="font-size:12px;color:#a8a29e;margin-top:3px;">Ranked by fit score · Easy Apply jobs highlighted</div>
+        </div>
+
+        <!-- Jobs table -->
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:#fafaf9;border-bottom:1px solid #e5e3e0;">
+              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Job</th>
+              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Score</th>
+              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Source</th>
+              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;"></th>
+            </tr>
+          </thead>
+          <tbody>${jobRows}</tbody>
+        </table>
+
+        <!-- Footer -->
+        <div style="padding:20px 24px;background:#fafaf9;border-top:1px solid #f0eeec;text-align:center;">
+          <div style="font-size:12px;color:#a8a29e;">
+            Sent by <strong style="color:#1c1917;">JobPilot</strong> · Running on your local machine
+          </div>
+          <div style="font-size:11px;color:#d6d3d1;margin-top:4px;">Visit <a href="http://localhost:3004" style="color:#2563eb;">localhost:3004</a> to manage your search</div>
+        </div>
+      </div>
+    </body>
+    </html>`;
+
+  await sendEmail(`JobPilot Daily Digest — ${top.length} top matches`, html, notifyTo)
+    .then(() => log("success", `✅ Daily digest sent to ${notifyTo}`))
+    .catch(err => log("error", "Daily digest send failed", err.message));
+}
+
 // ─── Scheduler ───────────────────────────────────────────────────────────────
+let digestJob = null;
+
 function startScheduler() {
   runCycle();
   const rule = new schedule.RecurrenceRule();
   rule.minute = new schedule.Range(0, 59, settings.intervalMinutes);
   schedulerJob = schedule.scheduleJob(rule, runCycle);
+
+  // Daily digest at 8:00 AM
+  if (!digestJob) {
+    digestJob = schedule.scheduleJob("0 8 * * *", sendDailyDigest);
+    log("info", "Daily digest scheduled for 8:00 AM");
+  }
 }
 
 function stopScheduler() {
   if (schedulerJob) { schedulerJob.cancel(); schedulerJob = null; }
+  // Keep digestJob running even when scanner is stopped
 }
 
 // ─── API routes ───────────────────────────────────────────────────────────────
@@ -925,6 +1063,16 @@ app.post("/api/skill-gap", (req, res) => {
     res.json({ ok: true, matched, missing, matchPct, expGap, total: skillArr.length });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/digest — send daily digest immediately (manual trigger)
+app.post("/api/digest", async (req, res) => {
+  try {
+    await sendDailyDigest();
+    res.json({ ok: true, message: "Digest sent" });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
   }
 });
 

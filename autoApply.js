@@ -25,9 +25,9 @@ export async function resetSession() {
 async function getBrowser() {
   if (!_browser) {
     _browser = await chromium.launch({
-      headless: false,
-      slowMo: 70,
-      args: ["--disable-blink-features=AutomationControlled", "--start-maximized"],
+      headless: true,   // run silently in background — no visible browser windows
+      slowMo: 50,
+      args: ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
     });
   }
   return _browser;
@@ -420,6 +420,7 @@ async function navigateAndSubmit(page, profile, resumePath, atsProvider = "") {
     "button:has-text('Submit my application'):visible",
     "button:has-text('Submit'):visible",
     "button:has-text('Send application'):visible",
+    "button:has-text('Send my application'):visible",
     "input[type='submit']:visible",
   ].join(", ");
 
@@ -428,7 +429,36 @@ async function navigateAndSubmit(page, profile, resumePath, atsProvider = "") {
     "button:has-text('Continue'):visible",
     "button:has-text('Next step'):visible",
     "button[aria-label*='Next']:visible",
+    "button:has-text('Save and continue'):visible",
   ].join(", ");
+
+  // ── Step 0: look for an "Apply" / "Apply Now" button on the job description page
+  // Many job sites (Lever, company pages) show the description first, then require
+  // clicking Apply to reach the actual form.
+  const APPLY_BTN_SELECTORS = [
+    "a:has-text('Apply for this job'):visible",
+    "a:has-text('Apply Now'):visible",
+    "a:has-text('Apply now'):visible",
+    "a:has-text('Apply'):visible",
+    "button:has-text('Apply for this job'):visible",
+    "button:has-text('Apply Now'):visible",
+    "button:has-text('Apply now'):visible",
+    "a[href*='apply']:visible",
+  ].join(", ");
+
+  try {
+    const applyBtn = page.locator(APPLY_BTN_SELECTORS).first();
+    if (await isVisible(applyBtn)) {
+      const href = await applyBtn.getAttribute("href").catch(() => null);
+      if (href && href.startsWith("http")) {
+        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      } else {
+        await applyBtn.click();
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+      }
+      await delay(2000, 500);
+    }
+  } catch { /* ignore — might already be on the form */ }
 
   for (let step = 0; step < 12; step++) {
     await fillATSForm(page, profile, resumePath, atsProvider);
@@ -523,6 +553,106 @@ async function openWithSimplify(url, job, profile) {
       return { success: false, reason: `Could not apply: ${err.message}` };
     }
   }
+}
+
+// ─── LinkedIn Easy Apply Direct Scraper ──────────────────────────────────────
+// Logs into LinkedIn, searches for Easy Apply jobs, returns array of job objects.
+// No Apify needed — runs entirely via Playwright.
+export async function scrapeLinkedInEasyApply(credentials, titles = [], locations = [], maxJobs = 25) {
+  if (!credentials?.linkedinEmail || !credentials?.linkedinPassword) return [];
+
+  let context;
+  try {
+    context = await ensureLinkedInLogin(credentials);
+  } catch (err) {
+    return [];
+  }
+
+  const jobs = [];
+  const seenUrls = new Set();
+
+  for (const title of titles.slice(0, 4)) {
+    for (const location of locations.slice(0, 2)) {
+      if (jobs.length >= maxJobs) break;
+      const page = await context.newPage();
+      try {
+        const searchUrl =
+          `https://www.linkedin.com/jobs/search/?` +
+          `keywords=${encodeURIComponent(title)}` +
+          `&location=${encodeURIComponent(location)}` +
+          `&f_LF=f_AL` +   // Easy Apply filter
+          `&sortBy=R` +     // Most recent
+          `&start=0`;
+
+        await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await delay(2500, 500);
+
+        // Scroll to load more results
+        await page.evaluate(() => window.scrollBy(0, 800)).catch(() => {});
+        await delay(1500, 300);
+
+        // Grab all job cards
+        const jobCards = await page.locator("li.jobs-search-results__list-item, div.job-card-container").all();
+
+        for (const card of jobCards.slice(0, 15)) {
+          if (jobs.length >= maxJobs) break;
+          try {
+            await card.click();
+            await delay(1500, 400);
+
+            // Get job URL from the detail pane or card link
+            const jobUrl = await page.locator(
+              "a.job-details-jobs-unified-top-card__job-title-link, a.jobs-apply-button, .jobs-details__main-content a"
+            ).first().getAttribute("href").catch(() => null)
+              || page.url();
+
+            const fullUrl = jobUrl?.startsWith("http")
+              ? jobUrl
+              : jobUrl ? `https://www.linkedin.com${jobUrl}` : page.url();
+
+            if (seenUrls.has(fullUrl)) continue;
+            seenUrls.add(fullUrl);
+
+            // Check Easy Apply badge
+            const easyApplyBtn = page.locator("button.jobs-apply-button").first();
+            const btnText = (await easyApplyBtn.innerText().catch(() => "")).toLowerCase();
+            if (!btnText.includes("easy apply")) continue;
+
+            // Scrape title, company, location
+            const jobTitle    = await page.locator(".job-details-jobs-unified-top-card__job-title, h1.t-24").first().innerText().catch(() => "");
+            const company     = await page.locator(".job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name").first().innerText().catch(() => "");
+            const loc         = await page.locator(".job-details-jobs-unified-top-card__bullet, .jobs-unified-top-card__workplace-type").first().innerText().catch(() => location);
+            const description = await page.locator(".jobs-description__content, .show-more-less-html__markup").first().innerText().catch(() => "");
+            const salary      = await page.locator("[class*='salary'], .compensation__salary-range-text").first().innerText().catch(() => "");
+
+            if (!jobTitle || !company) continue;
+
+            jobs.push({
+              id:          `li-direct-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+              title:       jobTitle.trim(),
+              company:     company.trim(),
+              location:    loc.trim() || location,
+              applyUrl:    fullUrl,
+              url:         fullUrl,
+              platform:    "linkedin",
+              easyApply:   true,
+              description: description.trim().slice(0, 2000),
+              salary:      salary.trim(),
+              postedAt:    new Date().toISOString(),
+              skills:      [],
+              via:         "LinkedIn Direct",
+            });
+          } catch { /* skip card errors */ }
+        }
+      } catch (err) {
+        // continue to next title/location
+      } finally {
+        await page.close().catch(() => {});
+      }
+    }
+  }
+
+  return jobs;
 }
 
 // ─── Extract job details from LinkedIn page ───────────────────────────────────

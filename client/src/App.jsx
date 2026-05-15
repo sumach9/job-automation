@@ -1466,6 +1466,7 @@ export default function App() {
                       <div style={{ display:"flex", gap:10 }}>
                         <button onClick={saveSettings} style={{ padding:"9px 22px", borderRadius:8, border:"none", background:"#1c1917", color:"#fff", fontWeight:600, fontSize:13, cursor:"pointer" }}>Save</button>
                         <button onClick={async()=>{const d=await apiFetch(`${API}/test-email`,{method:"POST"}).then(r=>r.json());showToast(d.ok?"Test email sent!":d.message,d.ok?"success":"error");}} style={{ padding:"9px 16px", borderRadius:8, border:"1px solid #e5e3e0", background:"transparent", color:"#57534e", fontSize:13, cursor:"pointer" }}>Test Email</button>
+                        <button onClick={async()=>{const d=await apiFetch(`${API}/digest`,{method:"POST"}).then(r=>r.json());showToast(d.ok?"Daily digest sent!":d.message,d.ok?"success":"error");}} style={{ padding:"9px 16px", borderRadius:8, border:"1px solid #bfdbfe", background:"#eff6ff", color:"#2563eb", fontSize:13, fontWeight:600, cursor:"pointer" }}>Send Digest Now</button>
                       </div>
                     </div>
 
