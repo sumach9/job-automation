@@ -1,272 +1,250 @@
-# ⚡ OneTouch Apply
+# ⚡ JobPilot — Automated Job Search
 
-> Apply to any job in one click. Auto-fills every field, generates a tailored cover letter per role, tracks every application through a Kanban pipeline — all from a Chrome extension backed by a local dashboard.
-
----
-
-## What it does
-
-OneTouch Apply is a **Chrome extension + local dashboard** that eliminates the manual grind of job applications:
-
-- **One click fills the entire form** — name, email, phone, LinkedIn, resume PDF upload, cover letter, EEO dropdowns, checkboxes, all of it
-- **Tailored cover letter per job** — backend reads the job description, matches your skills against it, and writes a custom cover letter before the form is filled. No external AI API needed
-- **Pipeline Kanban** — drag applications through Queued → OneTouch → Applied → Interviewing → Offered → Rejected
-- **Talking points report card** — click any pipeline card to see your matched skills, interview prep checklist, and the generated cover letter for that role
-- **Find Recruiter** — one button opens a LinkedIn search for recruiters at the company you just applied to
-- **Job scanner bot** — background bot auto-scrapes LinkedIn, Indeed, Glassdoor, Greenhouse, Lever, Ashby, Workday and 30+ ATS platforms, scores every job 0–5, and surfaces the best matches
-- **Dashboard** — live stats, job cards, application table, log terminal, settings panel
+JobPilot is a self-hosted job automation platform that finds, scores, and applies to jobs on your behalf. It runs locally on your Windows machine, searches multiple job platforms, auto-applies to Easy Apply jobs, and emails you a daily digest of all results.
 
 ---
 
-## Project structure
+## Features
 
-```
-onetouch-apply/
-├── extension/                  # Chrome extension (Manifest V3)
-│   ├── manifest.json           # Permissions, host patterns, content script config
-│   ├── content.js              # Injected into job pages — fills forms, injects ⚡ button
-│   ├── content.css             # Floating button, toast, score badge styles
-│   ├── background.js           # Service worker — badge counter, message routing
-│   ├── popup.html / popup.js   # 320px popup — profile editor, resume upload, actions
-│   ├── onboarding.html         # Welcome page on first install
-│   └── icons/                  # icon16/48/128.png
-│
-├── client/src/App.jsx          # React 18 + Vite dashboard
-│   ├── Dashboard view          # Stat cards, platform pills, activity feed
-│   ├── Pipeline view           # 6-column Kanban + talking points report card
-│   ├── Jobs view               # Scraped jobs with search / score filter / sort
-│   ├── Applications view       # Applied jobs table with stage badges
-│   ├── Logs view               # Terminal-style live log viewer
-│   └── Settings view           # Titles, locations, platforms, intervals
-│
-├── server.js                   # Express API (port 3004)
-├── atsScrapers.js              # Direct Greenhouse / Lever / Ashby API scrapers
-├── autoApply.js                # Playwright auto-apply for LinkedIn / Indeed
-├── scorer.js                   # Job match scoring engine (0–5)
-├── imageGen.js                 # SVG + Sharp stats image generator (no browser)
-├── data.json                   # Persistent jobs + applications store
-├── scan-history.tsv            # Audit trail — every job seen, timestamped
-└── railway.toml                # Railway deployment config
-```
+- **Multi-platform job search** — Google Jobs (SerpAPI), LinkedIn Easy Apply, Greenhouse, Lever, Ashby
+- **Fit scoring** — each job scored against your skills, experience, and target roles
+- **Auto-apply** — LinkedIn Easy Apply and ATS forms filled and submitted automatically via Playwright
+- **Resume upload** — drag-and-drop PDF/DOCX, profile auto-filled from your resume
+- **Daily email digest** — all found jobs sent to your inbox every morning at 8 AM
+- **Pipeline tracking** — Kanban board (Queued → Applied → Interviewing → Offered)
+- **JWT authentication** — password-protected dashboard
+- **Stripe billing** — optional subscription plans
 
 ---
 
-## Quick start
+## Tech Stack
 
-### 1. Clone and install
+| Layer | Technology |
+|-------|-----------|
+| Backend | Node.js 20, Express |
+| Frontend | React 18, Vite |
+| Automation | Playwright (Chromium) |
+| Job Sources | SerpAPI (Google Jobs), LinkedIn Direct, ATS scrapers |
+| Resume Parse | pdf-parse, mammoth |
+| Email | Nodemailer (Gmail) |
+| Auth | JWT (jsonwebtoken) |
+| Scheduler | node-schedule |
+| Payments | Stripe |
+
+---
+
+## Quick Start
+
+### 1. Clone the repo
 
 ```bash
 git clone https://github.com/sumach9/job-automation.git
 cd job-automation
-npm install
-cd client && npm install && npm run build && cd ..
 ```
 
-### 2. Configure environment
+### 2. Install dependencies & build
 
 ```bash
-cp .env.example .env
+npm run setup
 ```
 
-Key variables in `.env`:
+### 3. Configure environment
 
-```env
-# Job scraping (optional — ATS Direct works without Apify)
-APIFY_TOKEN=your_token
-SERPAPI_KEY=your_key
+Edit the `.env` file with your API keys and credentials (see [Configuration](#configuration) below).
 
-# LinkedIn auto-apply (optional)
-LINKEDIN_EMAIL=you@email.com
-LINKEDIN_PASSWORD=yourpass
-
-# What to search for
-JOB_TITLES=Data Scientist,ML Engineer,Data Engineer
-JOB_LOCATIONS=Seattle,WA,Remote
-
-# Email alerts (optional)
-EMAIL_USER=you@gmail.com
-EMAIL_PASS=gmail_app_password
-```
-
-### 3. Start the server
+### 4. Start the server
 
 ```bash
 npm start
-# Dashboard → http://localhost:3004
 ```
 
-### 4. Load the Chrome extension
+Open **http://localhost:3004** in your browser.
 
-1. Open Chrome → `chrome://extensions`
-2. Enable **Developer mode** (top-right toggle)
-3. Click **Load unpacked** → select the `extension/` folder
-4. The ⚡ OneTouch icon appears in the toolbar
-5. The onboarding page opens automatically
-
-### 5. Set up your profile
-
-Click ⚡ → **Profile tab**, fill in:
-
-| Field | Used for |
-|---|---|
-| Full Name, Email, Phone | All form fields |
-| LinkedIn URL, GitHub URL | Profile / social fields |
-| Location | City / state fields |
-| Expected Salary | Compensation fields |
-| Years of Experience | Experience fields |
-| **Skills** (comma-separated) | Skill matching + cover letter |
-| **Work Summary** (2–3 sentences) | Cover letter body |
-| School, Degree/Major | Education fields |
-| Work Preference (Remote/Hybrid/On-site) | Tailored cover letter tone |
-| Cover Letter | Optional — auto-generated per job if left blank |
-| Resume PDF | Uploaded to `input[type=file]` fields |
-
-Click **Save Profile**.
-
-### 6. Apply to a job
-
-Navigate to any supported job page → the **⚡ OneTouch Apply** button appears in the bottom-right corner → click it → every field fills automatically → click the highlighted Submit button.
-
----
-
-## Supported sites
-
-| Site | Fill | Resume upload | Multi-step |
-|---|---|---|---|
-| LinkedIn Easy Apply | ✅ | ✅ | ✅ All steps auto-advance |
-| Greenhouse (`job-boards.greenhouse.io`) | ✅ | ✅ | ✅ |
-| Lever (`jobs.lever.co`) | ✅ | ✅ | ✅ |
-| Ashby (`jobs.ashbyhq.com`) | ✅ | ✅ | ✅ |
-| Workday (`*.myworkdayjobs.com`) | ✅ | ✅ | ✅ Auto-advance steps |
-| Indeed | ✅ | ✅ | ✅ |
-| Glassdoor | ✅ | ✅ | — |
-| ZipRecruiter | ✅ | ✅ | — |
-| SmartRecruiters | ✅ | ✅ | — |
-| iCIMS, Taleo, SuccessFactors | ✅ | ✅ | — |
-
----
-
-## How tailored answers work
-
-When ⚡ is clicked, the extension:
-
-1. Scrapes the job title, company, and description from the page
-2. Sends `{ job, profile }` to `POST /api/generate-answers`
-3. Backend matches your **skills list** against the job description text
-4. Returns a **custom cover letter** mentioning matched skills + company name
-5. Returns a **"why this role"** answer for those specific textarea questions
-6. Returns **interview talking points** + a recruiter LinkedIn search URL
-7. All form fields — including cover letter / "why this company" textareas — fill with the tailored content
-8. Matched skills are shown in the success toast
-9. If score ≥ 3.5, a **💼 Find Recruiter** button appears (auto-dismisses after 30s)
-
-No GPT / Claude API needed. Pure template engine built into the backend.
-
----
-
-## Pipeline Kanban
-
-The **Pipeline tab** in the dashboard tracks every application:
+### 5. Log in
 
 ```
-📋 Queued → ⚡ OneTouch → ✓ Applied → 💬 Interviewing → 🏆 Offered 🎉 → ✕ Rejected
+Username: admin
+Password: jobpilot2024
 ```
 
-- Click any card → opens job detail + generates a **talking points card** (matched skills, prep checklist, cover letter preview)
-- Stage buttons on each card let you advance it with one click
-- Changes sync instantly to the server
+> Change these in your `.env` via `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
 
 ---
 
-## Job scanner bot
+## Configuration
 
-The background bot scrapes jobs on a configurable interval (default: every 5 min).
+All settings live in `.env`:
 
-**ATS Direct** — no API key needed, scrapes 34 verified companies:
+```env
+# ── Server ──────────────────────────────────────
+PORT=3004
 
-| Provider | Companies |
-|---|---|
-| **Greenhouse** | Anthropic, Databricks, Datadog, Elastic, MongoDB, Cloudflare, Twilio, Okta, Dropbox, Block, Stripe, Airbnb, Reddit, Pinterest, Duolingo, Twitch, Smartsheet, Lyft, Qualtrics, Figma, Asana, Coinbase, Instacart, TripAdvisor |
-| **Lever** | Palantir, Rover, Plaid |
-| **Ashby** | OpenAI, Perplexity, Cohere, Mistral, Confluent, Anyscale, Modal |
+# ── Admin Login ───────────────────────────────────
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=jobpilot2024
+JWT_SECRET=change-this-to-a-random-secret
 
-**With API keys:**
-- LinkedIn (Apify)
-- Indeed (Apify)
-- Glassdoor (Apify)
-- ZipRecruiter (Apify)
-- Google Jobs (SerpAPI)
+# ── SerpAPI (Google Jobs) ────────────────────────
+# Get yours at https://serpapi.com/dashboard
+SERPAPI_KEY=your_key_here
 
-Start/stop the bot from the dashboard header or:
+# ── Job Search Config ────────────────────────────
+JOB_TITLES=Data Scientist,Data Engineer,Data Analyst
+JOB_LOCATIONS=Seattle,Washington
+INTERVAL_MINUTES=5
+MAX_APPS_PER_RUN=10
+MAX_BROWSER_OPENS=5
+
+# ── Gmail Notifications ──────────────────────────
+EMAIL_USER=you@gmail.com
+EMAIL_PASS=your_app_password        # Gmail App Password, not your real password
+NOTIFY_EMAIL=you@gmail.com
+EMAIL_NOTIFICATIONS=true
+
+# ── LinkedIn Auto Apply ───────────────────────────
+AUTO_APPLY_ENABLED=true
+LINKEDIN_EMAIL=you@email.com
+LINKEDIN_PASSWORD=yourpassword
+
+# ── Applicant Profile ────────────────────────────
+APPLICANT_PHONE=8001234567
+APPLICANT_LOCATION=Seattle, WA
+RESUME_PATH=C:\path\to\your\resume.pdf
+
+# ── Apify (optional, for extra job sources) ──────
+APIFY_TOKEN=your_token_here
+
+# ── Stripe (optional, for billing) ──────────────
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+---
+
+## Usage
+
+### Dashboard — Overview
+- Live stats: jobs found, applications, interviews, hot matches
+- Top 5 best-fit jobs
+- Pipeline summary and recent activity feed
+
+### Jobs tab
+- Split-pane view: job list on the left, full detail on the right
+- Filter by platform, score, Easy Apply
+- Sort by best match, newest, or company name
+- Skill Gap analysis and Resume Draft per job
+
+### Pipeline tab
+- Kanban board: Queued → Applied → Interviewing → Offered → Rejected
+- Move cards between columns with one click
+- Click any card to view job details and get interview prep talking points
+
+### Applications tab
+- Full history table with status badges
+- Delete individual applications
+
+### Settings
+
+| Tab | What you configure |
+|-----|--------------------|
+| **Profile** | Upload resume (auto-fills all fields), personal info, education, experience |
+| **Search** | Job titles, locations, platforms, interval, auto-apply toggle |
+| **Agents** | AI agent suite (skill gap, outreach writer, etc.) |
+| **Billing** | Stripe subscription plans |
+
+---
+
+## Resume Upload
+
+Go to **Settings → Profile** and drag-and-drop your PDF or DOCX resume.
+
+JobPilot automatically extracts:
+- Name, email, phone, location
+- Skills (40+ tech keywords detected)
+- Work experience (company, title, dates, description)
+- Education (school, degree, major, GPA, years)
+- LinkedIn URL, years of experience
+
+All fields auto-populate in the form. Review, edit if needed, then click **Save Profile**.
+
+---
+
+## Email Digest
+
+A daily digest is sent every morning at **8:00 AM** containing:
+- Stats bar: total jobs, hot matches, auto-applied, interviewing
+- Every found job sorted by fit score with a direct **Apply →** link
+
+To send the digest immediately: **Settings → Search → Send Digest Now**
+
+---
+
+## How Auto-Apply Works
+
+1. Scanner runs every N minutes (default: 5)
+2. Searches Google Jobs + LinkedIn + ATS job boards
+3. Each job is scored against your profile (0–5 scale)
+4. **LinkedIn Easy Apply** jobs → Playwright logs in and submits automatically
+5. **Greenhouse / Lever / Ashby** → Playwright fills the form and clicks Submit
+6. Results logged with status: `✅ Auto-applied`, `Form filled`, or `Apply failed`
+
+> **Note:** Workday, Taleo, and SuccessFactors require account creation — these are marked `apply-failed` for manual apply.
+
+---
+
+## Scripts
 
 ```bash
-curl -X POST http://localhost:3004/api/start
-curl -X POST http://localhost:3004/api/stop
+npm start          # Start production server
+npm run dev        # Start with auto-restart on file changes
+npm run build      # Build the React frontend
+npm run setup      # Install all deps + build frontend (first-time setup)
 ```
 
 ---
 
-## API reference
+## Project Structure
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/status` | Bot status, stats, settings |
-| `POST` | `/api/start` | Start the job scanner |
-| `POST` | `/api/stop` | Stop the job scanner |
-| `GET` | `/api/jobs` | All scraped jobs (`?q=search&limit=200`) |
-| `GET` | `/api/applications` | Tracked applications |
-| `GET` | `/api/pipeline` | Applications grouped by stage |
-| `PATCH` | `/api/applications/:id/stage` | Move a card to a new stage |
-| `POST` | `/api/generate-answers` | Generate tailored cover letter + talking points |
-| `POST` | `/api/onetouch-apply` | Extension callback when a form is filled |
-| `POST` | `/api/score-job` | Score any job object (0–5) |
-| `GET` | `/api/ats-companies` | List all ATS companies being scraped |
-| `GET` | `/api/scan-history` | TSV audit trail of every job seen |
-| `GET` | `/api/viral-image` | 1200×630 PNG stats image (Sharp / SVG) |
-| `DELETE` | `/api/applications/:id` | Remove an application |
-
----
-
-## Score system
-
-Every job is scored 0–5 across three dimensions:
-
-| Dimension | What it checks |
-|---|---|
-| **Title match** (0–2) | Keywords in job title vs. your target roles |
-| **Skills match** (0–2) | Your skills list vs. job description text |
-| **Location match** (0–1) | Preferred location vs. job location / remote flag |
-
-Score ≥ 4 → highlighted green, appears at top of job list, triggers recruiter button in extension.
-
----
-
-## Deploy to Railway
-
-```bash
-# 1. Push repo to GitHub
-# 2. Connect at railway.app → New Project → Deploy from GitHub repo
-# 3. Set environment variables in Railway dashboard
-# railway.toml is already configured — auto-builds client, installs Playwright
+```
+job-automation/
+├── server.js          # Express API + scheduler + all routes
+├── autoApply.js       # Playwright automation (LinkedIn, ATS, direct)
+├── atsScrapers.js     # Greenhouse / Lever / Ashby scrapers
+├── resumeParser.js    # PDF/DOCX resume parser
+├── scorer.js          # Job fit scoring algorithm
+├── imageGen.js        # Viral job image generator
+├── client/            # React frontend (Vite)
+│   └── src/App.jsx    # Single-file React app
+├── uploads/           # Uploaded resumes (gitignored)
+├── data.json          # Persistent state (applications, jobs, logs)
+├── .env               # Your secrets (gitignored)
+└── README.md
 ```
 
 ---
 
-## Tech stack
+## Security
 
-| Layer | Tech |
-|---|---|
-| Chrome extension | Manifest V3, vanilla JS, DataTransfer API, chrome.storage.local |
-| Dashboard | React 18, Vite, inline CSS variables |
-| Backend | Node.js ESM, Express 4 |
-| Browser automation | Playwright (system Chrome channel) |
-| Job scraping | Apify actors, SerpAPI, direct ATS REST APIs |
-| Image generation | Sharp + pure SVG (no browser, no external API) |
-| Persistence | JSON flat file + TSV audit log |
-| Deployment | Railway via nixpacks |
+- Dashboard protected by JWT authentication (30-day tokens)
+- `.env` is gitignored — never committed
+- `uploads/` and `data.json` are gitignored
+- Change `JWT_SECRET`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD` before sharing the machine
 
 ---
 
-## Author
+## Troubleshooting
 
-Built by **Suma Chidara** · [github.com/sumach9](https://github.com/sumach9)
+| Problem | Fix |
+|---------|-----|
+| Blank page after login | Clear localStorage and hard refresh (Ctrl+Shift+R) |
+| Scanner finds 0 jobs | Check `SERPAPI_KEY` is valid at serpapi.com/dashboard |
+| LinkedIn apply fails | Verify `LINKEDIN_EMAIL` / `LINKEDIN_PASSWORD` in `.env` |
+| Email not sending | Use a Gmail App Password, not your real Gmail password |
+| Port 3004 already in use | Run `Get-Process node \| Stop-Process -Force` then restart |
+| Resume parse fails | Ensure file is a real PDF/DOCX, not a scanned image |
+
+---
+
+## License
+
+MIT — build on it, ship it, make it yours.
