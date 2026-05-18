@@ -186,15 +186,15 @@ function log(level, message, detail = "") {
 }
 
 // ─── Email helper ────────────────────────────────────────────────────────────
-async function sendEmail(subject, html) {
-  if (!settings.emailNotifications || !settings.emailUser || !settings.emailPass) return;
+async function sendEmail(subject, html, toOverride = null) {
+  if (!settings.emailUser || !settings.emailPass) return;
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: { user: settings.emailUser, pass: settings.emailPass },
   });
   await transporter.sendMail({
     from: settings.emailUser,
-    to: settings.notifyEmail || settings.emailUser,
+    to: toOverride || settings.notifyEmail || settings.emailUser,
     subject,
     html,
   });
@@ -735,105 +735,109 @@ async function runCycle() {
 
 // ─── Daily Digest Email ──────────────────────────────────────────────────────
 async function sendDailyDigest() {
-  if (!settings.emailNotifications) return;
-  const notifyTo = settings.notifyEmail || process.env.NOTIFY_EMAIL;
-  if (!notifyTo) return;
+  // Always send to chidarasuma0209@gmail.com regardless of settings
+  const notifyTo = "chidarasuma0209@gmail.com";
 
-  const top = [...foundJobs]
-    .sort((a, b) => (b.score || 0) - (a.score || 0))
-    .slice(0, 15);
+  // Send ALL found jobs, sorted by score descending
+  const allJobs = [...foundJobs].sort((a, b) => (b.score || 0) - (a.score || 0));
 
-  if (top.length === 0) {
-    log("info", "Daily digest: no jobs to send yet");
+  if (allJobs.length === 0) {
+    log("info", "Daily digest: no jobs found yet — start the scanner first");
     return;
   }
 
-  const autoApplied = applications.filter(a => a.status === "auto-applied").length;
+  const autoApplied  = applications.filter(a => a.status === "auto-applied").length;
   const interviewing = applications.filter(a => a.status === "interviewing").length;
+  const hotMatches   = allJobs.filter(j => j.score >= 3.5).length;
 
-  const scoreColor = (s) =>
-    s >= 3.5 ? "#16a34a" : s >= 2.5 ? "#d97706" : "#dc2626";
+  const sc = (s) => s >= 3.5 ? "#16a34a" : s >= 2.5 ? "#d97706" : "#dc2626";
 
-  const jobRows = top.map(j => `
-    <tr style="border-bottom:1px solid #f0eeec;">
-      <td style="padding:12px 16px;">
-        <div style="font-weight:600;color:#1c1917;font-size:14px;">${j.title}</div>
-        <div style="color:#78716c;font-size:12px;margin-top:2px;">${j.company} · ${j.location || "—"}</div>
+  const jobRows = allJobs.map((j, i) => `
+    <tr style="border-bottom:1px solid #f0eeec;background:${i % 2 === 0 ? "#fff" : "#fafaf9"};">
+      <td style="padding:11px 14px;font-size:12px;color:#a8a29e;font-weight:600;width:32px;">${i + 1}</td>
+      <td style="padding:11px 14px;">
+        <div style="font-weight:600;color:#1c1917;font-size:13px;line-height:1.3;">${j.title}</div>
+        <div style="color:#78716c;font-size:12px;margin-top:2px;">${j.company}${j.location ? " · " + j.location : ""}</div>
+        ${j.salary ? `<div style="color:#16a34a;font-size:11px;margin-top:2px;">${j.salary}</div>` : ""}
       </td>
-      <td style="padding:12px 16px;white-space:nowrap;">
-        <span style="background:${scoreColor(j.score)}18;color:${scoreColor(j.score)};border:1px solid ${scoreColor(j.score)}30;border-radius:6px;padding:3px 9px;font-size:12px;font-weight:700;">${j.score ?? "—"}</span>
+      <td style="padding:11px 14px;white-space:nowrap;vertical-align:top;">
+        <span style="background:${sc(j.score)}18;color:${sc(j.score)};border:1px solid ${sc(j.score)}30;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;">${j.score ?? "—"}</span>
       </td>
-      <td style="padding:12px 16px;">
-        <span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:2px 8px;font-size:11px;">${j.platform || "—"}</span>
-        ${j.easyApply ? '<span style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:4px;padding:2px 8px;font-size:11px;margin-left:4px;">Easy Apply</span>' : ""}
+      <td style="padding:11px 14px;vertical-align:top;">
+        <span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:2px 7px;font-size:11px;">${j.platform || "—"}</span>
+        ${j.easyApply ? '<br><span style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:600;margin-top:3px;display:inline-block;">Easy Apply</span>' : ""}
       </td>
-      <td style="padding:12px 16px;">
-        <a href="${j.url}" style="background:#1c1917;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;text-decoration:none;">Apply →</a>
+      <td style="padding:11px 14px;vertical-align:top;white-space:nowrap;">
+        <a href="${j.url}" style="background:#1c1917;color:#fff;border-radius:6px;padding:6px 13px;font-size:12px;font-weight:600;text-decoration:none;">Apply →</a>
       </td>
     </tr>`).join("");
 
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <body style="margin:0;padding:0;background:#fafaf9;font-family:'Helvetica Neue',Arial,sans-serif;">
-      <div style="max-width:640px;margin:32px auto;background:#fff;border-radius:16px;border:1px solid #e5e3e0;overflow:hidden;">
+  const html = `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#fafaf9;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <div style="max-width:700px;margin:32px auto;background:#fff;border-radius:16px;border:1px solid #e5e3e0;overflow:hidden;">
 
-        <!-- Header -->
-        <div style="background:#1c1917;padding:28px 32px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div style="background:#fff;border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:18px;">⚡</div>
-            <span style="color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.5px;">JobPilot Daily Digest</span>
-          </div>
-          <div style="color:#a8a29e;font-size:13px;margin-top:8px;">${new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
-        </div>
-
-        <!-- Stats bar -->
-        <div style="display:flex;background:#fafaf9;border-bottom:1px solid #f0eeec;">
-          ${[
-            ["Jobs Found", foundJobs.length, "#2563eb"],
-            ["Auto-Applied", autoApplied, "#16a34a"],
-            ["Interviewing", interviewing, "#0891b2"],
-            ["Hot Matches", top.filter(j=>j.score>=3.5).length, "#d97706"],
-          ].map(([lbl,val,c]) => `
-            <div style="flex:1;padding:16px;text-align:center;border-right:1px solid #f0eeec;">
-              <div style="font-size:22px;font-weight:700;color:${c};">${val}</div>
-              <div style="font-size:11px;color:#a8a29e;text-transform:uppercase;letter-spacing:0.06em;margin-top:3px;">${lbl}</div>
-            </div>`).join("")}
-        </div>
-
-        <!-- Section header -->
-        <div style="padding:20px 24px 8px;">
-          <div style="font-size:13px;font-weight:700;color:#1c1917;">Top ${top.length} Job Matches Today</div>
-          <div style="font-size:12px;color:#a8a29e;margin-top:3px;">Ranked by fit score · Easy Apply jobs highlighted</div>
-        </div>
-
-        <!-- Jobs table -->
-        <table style="width:100%;border-collapse:collapse;">
-          <thead>
-            <tr style="background:#fafaf9;border-bottom:1px solid #e5e3e0;">
-              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Job</th>
-              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Score</th>
-              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Source</th>
-              <th style="padding:8px 16px;text-align:left;font-size:11px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;"></th>
-            </tr>
-          </thead>
-          <tbody>${jobRows}</tbody>
-        </table>
-
-        <!-- Footer -->
-        <div style="padding:20px 24px;background:#fafaf9;border-top:1px solid #f0eeec;text-align:center;">
-          <div style="font-size:12px;color:#a8a29e;">
-            Sent by <strong style="color:#1c1917;">JobPilot</strong> · Running on your local machine
-          </div>
-          <div style="font-size:11px;color:#d6d3d1;margin-top:4px;">Visit <a href="http://localhost:3004" style="color:#2563eb;">localhost:3004</a> to manage your search</div>
-        </div>
+    <!-- Header -->
+    <div style="background:#1c1917;padding:26px 28px;">
+      <div style="display:inline-flex;align-items:center;gap:10px;">
+        <span style="background:#fff;border-radius:8px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:16px;">⚡</span>
+        <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:-0.5px;">JobPilot — All Job Results</span>
       </div>
-    </body>
-    </html>`;
+      <div style="color:#a8a29e;font-size:12px;margin-top:6px;">${new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
+    </div>
 
-  await sendEmail(`JobPilot Daily Digest — ${top.length} top matches`, html, notifyTo)
-    .then(() => log("success", `✅ Daily digest sent to ${notifyTo}`))
-    .catch(err => log("error", "Daily digest send failed", err.message));
+    <!-- Stats bar -->
+    <table style="width:100%;border-collapse:collapse;background:#fafaf9;border-bottom:1px solid #e5e3e0;">
+      <tr>
+        ${[
+          ["Total Jobs", allJobs.length, "#2563eb"],
+          ["Hot Matches", hotMatches, "#d97706"],
+          ["Auto-Applied", autoApplied, "#16a34a"],
+          ["Interviewing", interviewing, "#0891b2"],
+        ].map(([lbl, val, c]) => `
+          <td style="padding:14px;text-align:center;border-right:1px solid #e5e3e0;">
+            <div style="font-size:24px;font-weight:700;color:${c};">${val}</div>
+            <div style="font-size:10px;color:#a8a29e;text-transform:uppercase;letter-spacing:0.07em;margin-top:2px;">${lbl}</div>
+          </td>`).join("")}
+      </tr>
+    </table>
+
+    <!-- Sub header -->
+    <div style="padding:16px 20px;border-bottom:1px solid #f0eeec;background:#fff;">
+      <span style="font-size:13px;font-weight:700;color:#1c1917;">${allJobs.length} Jobs Found</span>
+      <span style="font-size:12px;color:#a8a29e;margin-left:8px;">Sorted by fit score · Click Apply → to open each job</span>
+    </div>
+
+    <!-- Jobs table -->
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr style="background:#f5f4f2;border-bottom:1px solid #e5e3e0;">
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;">#</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;">Job</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;">Score</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;">Platform</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;"></th>
+        </tr>
+      </thead>
+      <tbody>${jobRows}</tbody>
+    </table>
+
+    <!-- Footer -->
+    <div style="padding:16px 20px;background:#fafaf9;border-top:1px solid #f0eeec;text-align:center;">
+      <div style="font-size:12px;color:#a8a29e;">Sent by <strong style="color:#1c1917;">JobPilot</strong> to ${notifyTo}</div>
+      <div style="font-size:11px;color:#d6d3d1;margin-top:3px;">Manage your search at <a href="http://localhost:3004" style="color:#2563eb;">localhost:3004</a></div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await sendEmail(
+    `JobPilot: ${allJobs.length} jobs found — ${new Date().toLocaleDateString("en-US",{month:"short",day:"numeric"})}`,
+    html,
+    notifyTo
+  )
+    .then(() => log("success", `✅ Digest sent to ${notifyTo} — ${allJobs.length} jobs`))
+    .catch(err => log("error", "Digest send failed", err.message));
 }
 
 // ─── Scheduler ───────────────────────────────────────────────────────────────
