@@ -465,6 +465,98 @@ function PipelineCard({ app, stageKey, onMove, onSelect }) {
   );
 }
 
+// ─── Resume Upload Card ───────────────────────────────────────────────────────
+function ResumeUploadCard({ onParsed, showToast, currentResumePath }) {
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState(null);
+  const inputRef = useRef(null);
+
+  const upload = async (file) => {
+    if (!file) return;
+    const allowed = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword", "text/plain"];
+    if (!allowed.includes(file.type) && !/\.(pdf|docx?|txt)$/i.test(file.name)) {
+      showToast("Only PDF, DOCX, or TXT files", "error"); return;
+    }
+    setUploading(true); setResult(null);
+    const form = new FormData();
+    form.append("resume", file);
+    try {
+      const d = await apiFetch(`${API}/upload-resume`, { method:"POST", body:form }).then(r=>r.json());
+      if (d.ok) { setResult(d.parsed); onParsed(d.profile); }
+      else showToast(d.message || "Parse failed", "error");
+    } catch { showToast("Upload failed","error"); }
+    setUploading(false);
+  };
+
+  const onDrop = (e) => { e.preventDefault(); setDragging(false); upload(e.dataTransfer.files[0]); };
+
+  return (
+    <div style={{ background:"#fff", borderRadius:14, border:"1px solid #e5e3e0", overflow:"hidden" }}>
+      <div style={{ padding:"18px 24px", borderBottom:"1px solid #f0eeec", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div>
+          <div style={{ fontSize:14, fontWeight:700, color:"#1c1917" }}>Resume</div>
+          <div style={{ fontSize:12, color:"#a8a29e", marginTop:2 }}>Upload your PDF or DOCX — we'll auto-fill your profile</div>
+        </div>
+        {currentResumePath && <span style={{ fontSize:11, color:"#16a34a", background:"#dcfce7", border:"1px solid #bbf7d0", borderRadius:20, padding:"3px 10px", fontWeight:600 }}>✓ Resume on file</span>}
+      </div>
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDragging(true);}}
+        onDragLeave={()=>setDragging(false)}
+        onDrop={onDrop}
+        onClick={()=>inputRef.current?.click()}
+        style={{
+          margin:16, borderRadius:10, border:`2px dashed ${dragging?"#2563eb":"#e5e3e0"}`,
+          background:dragging?"#eff6ff":"#fafaf9", padding:"28px 20px",
+          textAlign:"center", cursor:"pointer", transition:"all .15s",
+        }}
+      >
+        <input ref={inputRef} type="file" accept=".pdf,.docx,.doc,.txt" style={{display:"none"}}
+          onChange={e => upload(e.target.files[0])}/>
+        {uploading ? (
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
+            <div style={{ width:28, height:28, border:"3px solid #e5e3e0", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin .7s linear infinite" }}/>
+            <span style={{ fontSize:13, color:"#2563eb", fontWeight:600 }}>Parsing resume…</span>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize:28, marginBottom:8 }}>📄</div>
+            <div style={{ fontSize:13, fontWeight:600, color:"#1c1917", marginBottom:4 }}>Drop your resume here or click to browse</div>
+            <div style={{ fontSize:12, color:"#a8a29e" }}>PDF, DOCX, or TXT · Max 10 MB</div>
+          </>
+        )}
+      </div>
+
+      {/* Parse result preview */}
+      {result && (
+        <div style={{ margin:"0 16px 16px", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"14px 16px" }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"#16a34a", marginBottom:10 }}>✓ Profile auto-filled from resume</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {[
+              result.name       && ["Name",       result.name],
+              result.email      && ["Email",      result.email],
+              result.phone      && ["Phone",      result.phone],
+              result.location   && ["Location",   result.location],
+              result.skills?.length && ["Skills", `${result.skills.length} detected`],
+              result.experiences?.length && ["Experience", `${result.experiences.length} jobs`],
+              result.education?.length && ["Education", `${result.education.length} entries`],
+              result.yearsExperience && ["Years Exp", result.yearsExperience + " yrs"],
+            ].filter(Boolean).map(([k,v]) => (
+              <div key={k} style={{ background:"#fff", border:"1px solid #bbf7d0", borderRadius:7, padding:"5px 10px", fontSize:12 }}>
+                <span style={{ color:"#a8a29e" }}>{k}: </span>
+                <span style={{ fontWeight:600, color:"#1c1917" }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize:11, color:"#16a34a", marginTop:10 }}>Scroll down to review and edit the auto-filled fields, then click Save Profile.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Settings Field ───────────────────────────────────────────────────────────
 function Field({ label, children }) {
   return (
@@ -1333,6 +1425,10 @@ export default function App() {
                 {/* Profile tab */}
                 {settingsTab==="profile" && (
                   <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+
+                    {/* ── Resume Upload Card ── */}
+                    <ResumeUploadCard onParsed={(profile) => { setSettingsForm(f => ({...f, profile:{...f.profile,...profile}})); showToast("Resume parsed — profile auto-filled!"); }} showToast={showToast} currentResumePath={settingsForm?.profile?.resumePath}/>
+
                     <div style={{ background:"#fff", borderRadius:14, padding:"22px 24px", border:"1px solid #e5e3e0" }}>
                       <div style={{ fontSize:14, fontWeight:700, color:"#1c1917", marginBottom:18 }}>Personal Information</div>
                       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:14 }}>

@@ -9,10 +9,12 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import jwt from "jsonwebtoken";
+import multer from "multer";
 import { smartApply, detectPlatform, resetSession, scrapeLinkedInEasyApply } from "./autoApply.js";
 import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES, ATS_COMPANY_COUNT } from "./atsScrapers.js";
 import { scoreJob, scoreLabel, scoreColor } from "./scorer.js";
 import { generateViralImage } from "./imageGen.js";
+import { parseResume } from "./resumeParser.js";
 
 dotenv.config();
 
@@ -54,6 +56,58 @@ app.use("/api", (req, res, next) => {
 // GET /api/auth/me — verify token and return user info
 app.get("/api/auth/me", (req, res) => {
   res.json({ ok: true, username: req.user.sub, role: req.user.role });
+});
+
+// ─── Resume upload & parse ────────────────────────────────────────────────────
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const upload = multer({
+  dest: uploadsDir,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (req, file, cb) => {
+    const ok = /\.(pdf|docx?|txt)$/i.test(file.originalname);
+    cb(ok ? null : new Error("Only PDF, DOCX, or TXT files accepted"), ok);
+  },
+});
+
+// POST /api/upload-resume — upload resume + parse it into profile fields
+app.post("/api/upload-resume", upload.single("resume"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, message: "No file uploaded" });
+  // Rename to keep original extension
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  const destPath = path.join(uploadsDir, `resume${ext}`);
+  try {
+    fs.renameSync(req.file.path, destPath);
+    const parsed = await parseResume(destPath);
+    // Merge parsed data into settings profile (don't overwrite fields user already set)
+    const p = settings.profile || {};
+    const merged = {
+      name:            parsed.name            || p.name            || "",
+      email:           parsed.email           || p.email           || "",
+      phone:           parsed.phone           || p.phone           || "",
+      location:        parsed.location        || p.location        || "",
+      summary:         parsed.summary         || p.summary         || "",
+      skills:          parsed.skills?.length  ? parsed.skills      : (p.skills || []),
+      yearsExperience: parsed.yearsExperience || p.yearsExperience || "",
+      targetRoles:     parsed.targetRoles     || p.targetRoles     || "",
+      linkedinUrl:     parsed.linkedinUrl     || p.linkedinUrl     || "",
+      website:         parsed.website         || p.website         || "",
+      school:          parsed.school          || p.school          || "",
+      degree:          parsed.degree          || p.degree          || "",
+      education:       parsed.education?.length ? parsed.education : (p.education || []),
+      experiences:     parsed.experiences?.length ? parsed.experiences : (p.experiences || []),
+      resumePath:      destPath,
+    };
+    settings.profile = merged;
+    saveData({ applications, logs, foundJobs });
+    log("success", `✅ Resume parsed: ${req.file.originalname} — ${parsed.skills?.length || 0} skills, ${parsed.experiences?.length || 0} jobs, ${parsed.education?.length || 0} education`);
+    res.json({ ok: true, profile: merged, parsed });
+  } catch (err) {
+    try { fs.unlinkSync(req.file.path); } catch {}
+    log("error", "Resume parse failed", err.message);
+    res.status(500).json({ ok: false, message: err.message });
+  }
 });
 
 // ─── Serve React build in production ───────────────────────────────────────
