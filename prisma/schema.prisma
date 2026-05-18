@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Jobs ─────────────────────────────────────────────────────────────────────
+model Job {
+  id             String   @id @default(cuid())
+  title          String
+  company        String
+  location       String?
+  url            String   @unique
+  applyUrl       String?
+  platform       String
+  easyApply      Boolean  @default(false)
+  description    String?
+  salary         String?
+  workMode       String?
+  jobType        String?
+  skills         String   @default("[]")   // JSON array
+  score          Float?
+  scoreBreakdown String?                   // JSON object
+  scoreLabel     String?
+  via            String?
+  atsProvider    String?
+  postedAt       DateTime?
+  savedAt        DateTime @default(now())
+  applications   Application[]
+}
+
+// ─── Applications ─────────────────────────────────────────────────────────────
+model Application {
+  id           String          @id @default(cuid())
+  jobId        String
+  job          Job             @relation(fields: [jobId], references: [id])
+  status       String          @default("queued")
+  retryCount   Int             @default(0)
+  maxRetries   Int             @default(3)
+  note         String?
+  appliedAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  checkpoints  Checkpoint[]
+  queueJobs    QueueJob[]
+  logs         WorkflowLog[]
+}
+
+// ─── Queue ────────────────────────────────────────────────────────────────────
+model QueueJob {
+  id            String      @id @default(cuid())
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id])
+  type          String       // "apply" | "scrape" | "digest" | "parse_resume"
+  payload       String       // JSON
+  status        String       @default("pending")  // pending | processing | done | failed | dead
+  priority      Int          @default(0)
+  attempts      Int          @default(0)
+  maxAttempts   Int          @default(3)
+  runAt         DateTime     @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  error         String?
+  result        String?      // JSON
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+// ─── Checkpoints ──────────────────────────────────────────────────────────────
+model Checkpoint {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id])
+  step          String
+  state         String      // JSON — full workflow state at this point
+  screenshotPath String?
+  cookiesPath   String?
+  createdAt     DateTime    @default(now())
+}
+
+// ─── Structured Logs ──────────────────────────────────────────────────────────
+model WorkflowLog {
+  id            String      @id @default(cuid())
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id])
+  workflowId    String?
+  jobId         String?
+  platform      String?
+  step          String?
+  status        String
+  retryCount    Int         @default(0)
+  browserId     String?
+  error         String?
+  fallbackUsed  Boolean     @default(false)
+  message       String
+  meta          String?     // JSON extra data
+  createdAt     DateTime    @default(now())
+}
+
+// ─── Browser Sessions ─────────────────────────────────────────────────────────
+model BrowserSession {
+  id          String    @id @default(cuid())
+  browserId   String    @unique
+  platform    String
+  cookiesPath String?
+  jobCount    Int       @default(0)
+  maxJobs     Int       @default(10)
+  status      String    @default("active")   // active | recycling | closed
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+}
+
+// ─── Semantic Memory ──────────────────────────────────────────────────────────
+model SemanticMemory {
+  id          String    @id @default(cuid())
+  type        String    // "ats_field" | "company" | "form_pattern"
+  key         String
+  value       String    // JSON
+  confidence  Float     @default(1.0)
+  usedCount   Int       @default(1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([type, key])
+}
+
+// ─── Resume Metadata ──────────────────────────────────────────────────────────
+model ResumeVersion {
+  id          String    @id @default(cuid())
+  filePath    String
+  parsedData  String    // JSON profile
+  targetRole  String?
+  variant     String    @default("default")
+  createdAt   DateTime  @default(now())
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+model Settings {
+  id        String   @id @default("singleton")
+  data      String   // JSON blob — full settings object
+  updatedAt DateTime @updatedAt
+}

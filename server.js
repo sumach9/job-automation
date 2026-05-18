@@ -1767,5 +1767,78 @@ function sanitizeSettings(s) {
   };
 }
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Job automation server running on http://localhost:${PORT}`));
+// ─── New Architecture Routes (Phase 1-4) ──────────────────────────────────────
+// These endpoints use the new DB layer and are served alongside legacy routes.
+
+import { getLogs, getApplications, getJobs, getPipelineStages } from "./src/storage/db.js";
+import { bootstrap } from "./src/bootstrap.js";
+import { generateOutreach, generateInterviewPrep, analyzeSkillGap } from "./src/ai/prompts/outreach.js";
+
+// GET /api/db/jobs — jobs from SQLite (scored, paginated)
+app.get("/api/db/jobs", async (req, res) => {
+  try {
+    const { search = "", minScore = 0, limit = 200, offset = 0 } = req.query;
+    const result = await getJobs({ search, minScore: parseFloat(minScore) || 0, limit: parseInt(limit), offset: parseInt(offset) });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/db/applications — applications from SQLite
+app.get("/api/db/applications", async (req, res) => {
+  try {
+    const result = await getApplications({ limit: 500 });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/db/pipeline — kanban stages from SQLite
+app.get("/api/db/pipeline", async (req, res) => {
+  try {
+    const stages = await getPipelineStages();
+    res.json(stages);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/db/logs — workflow logs from SQLite
+app.get("/api/db/logs", async (req, res) => {
+  try {
+    const logs = await getLogs(parseInt(req.query.limit) || 200);
+    res.json(logs);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/ai/outreach — generate recruiter outreach message
+app.post("/api/ai/outreach", async (req, res) => {
+  try {
+    const { job, profile, type = "linkedin_connect" } = req.body;
+    const message = await generateOutreach(job, profile, type);
+    res.json({ ok: true, message });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// POST /api/ai/interview-prep — generate interview talking points
+app.post("/api/ai/interview-prep", async (req, res) => {
+  try {
+    const { job, profile } = req.body;
+    const points = await generateInterviewPrep(job, profile);
+    res.json({ ok: true, points });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// POST /api/ai/skill-gap — analyze skill gap
+app.post("/api/ai/skill-gap", async (req, res) => {
+  try {
+    const { job, profile } = req.body;
+    const analysis = await analyzeSkillGap(job, profile);
+    res.json({ ok: true, analysis });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PORT = process.env.PORT || 3004;
+const server = app.listen(PORT, async () => {
+  console.log(`JobPilot running on http://localhost:${PORT}`);
+  // Wire up new architecture after server is ready
+  await bootstrap().catch(err => console.error("Bootstrap error:", err.message));
+});
