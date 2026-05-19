@@ -101,40 +101,83 @@ export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }
 
   try {
     await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await delay(1500, 800);
+    await delay(2000, 500);
     const jobDetails = await scrapeJobDetails(page);
 
-    const btn = page.locator("button.jobs-apply-button").first();
-    const btnText = (await btn.innerText().catch(() => "")).toLowerCase();
-    if (!btnText.includes("easy apply")) {
-      return { ...result, reason: "No Easy Apply button", jobDetails };
+    // ── Find Easy Apply button (updated 2024-2025 selectors) ────────────────
+    const easyApplySelectors = [
+      "button[aria-label*='Easy Apply']",
+      "button.jobs-apply-button",
+      "button[class*='jobs-apply-button']",
+      ".jobs-apply-button--top-card",
+      "button:has-text('Easy Apply')",
+    ];
+    let btn = null;
+    for (const sel of easyApplySelectors) {
+      const el = page.locator(sel).first();
+      if (await isVisible(el)) { btn = el; break; }
+    }
+    if (!btn) {
+      // Not an Easy Apply job — log and skip (don't open browser)
+      return { ...result, reason: "No Easy Apply button — external application", jobDetails };
     }
 
     await btn.click();
-    await delay(2000, 500);
+    await delay(2500, 500);
 
-    for (let step = 0; step < 15; step++) {
-      await delay(900, 400);
+    // ── Multi-step form loop ─────────────────────────────────────────────────
+    for (let step = 0; step < 20; step++) {
+      await delay(1000, 400);
       await fillLinkedInStep(page, profile, resumePath);
 
-      const submitBtn = page.locator(
-        "button[aria-label*='Submit application'], button:has-text('Submit application')"
-      ).first();
+      // Check for submit button first
+      const submitBtn = page.locator([
+        "button[aria-label*='Submit application']",
+        "button:has-text('Submit application')",
+        "button:has-text('Submit Application')",
+      ].join(", ")).first();
+
       if (await isVisible(submitBtn)) {
         await submitBtn.click();
-        await delay(2000, 300);
-        return { success: true, reason: "Submitted via LinkedIn Easy Apply", autoApplied: true, jobDetails };
+        await delay(2500, 300);
+        // Check for success confirmation
+        const confirmed = await page.locator([
+          "h3:has-text('application was sent')",
+          "div:has-text('Your application was sent')",
+          ".artdeco-inline-feedback--success",
+          "h2:has-text('applied')",
+        ].join(", ")).first().isVisible({ timeout: 3000 }).catch(() => false);
+        return {
+          success: true,
+          reason: confirmed ? "Submitted via LinkedIn Easy Apply ✅" : "Clicked Submit (unconfirmed)",
+          autoApplied: true,
+          jobDetails,
+        };
       }
 
-      const nextBtn = page.locator(
-        "button[aria-label*='Continue to next step'], button[aria-label*='Review'], button:has-text('Next'), button:has-text('Review'), button:has-text('Continue')"
-      ).first();
+      // Check for Next / Review / Continue
+      const nextBtn = page.locator([
+        "button[aria-label*='Continue to next step']",
+        "button[aria-label*='Review your application']",
+        "button:has-text('Next')",
+        "button:has-text('Review')",
+        "button:has-text('Continue')",
+      ].join(", ")).first();
+
       if (await isVisible(nextBtn)) {
         await nextBtn.click();
-      } else {
-        result.reason = "Could not find Next/Submit";
-        break;
+        continue;
       }
+
+      // Dismiss any error/warning modals
+      const dismissBtn = page.locator("button[aria-label*='Dismiss']").first();
+      if (await isVisible(dismissBtn)) {
+        await dismissBtn.click();
+        continue;
+      }
+
+      result.reason = "Could not find Next or Submit button";
+      break;
     }
     return { ...result, reason: result.reason || "Form exceeded step limit", jobDetails };
   } catch (err) {
@@ -145,45 +188,61 @@ export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }
 }
 
 async function fillLinkedInStep(page, profile, resumePath) {
-  // Phone
-  const phoneInput = page.locator("input[id*='phoneNumber'], input[name*='phone']").first();
-  if (await isVisible(phoneInput) && !(await phoneInput.inputValue())) {
+  // ── Phone number ─────────────────────────────────────────────────────────
+  const phoneInput = page.locator([
+    "input[id*='phoneNumber']",
+    "input[name*='phone']",
+    "input[id*='phone']",
+  ].join(", ")).first();
+  if (await isVisible(phoneInput) && !(await phoneInput.inputValue().catch(() => ""))) {
     await phoneInput.fill(profile.phone || "");
   }
 
-  // Resume upload
+  // ── Resume upload ─────────────────────────────────────────────────────────
   if (resumePath && fs.existsSync(resumePath)) {
     const fileInput = page.locator("input[type='file']").first();
     if (await isVisible(fileInput)) {
-      await fileInput.setInputFiles(resumePath);
+      await fileInput.setInputFiles(resumePath).catch(() => {});
       await delay(2500, 500);
     }
   }
 
-  // Yes/No radio buttons — default to Yes
-  for (const radio of await page.locator("fieldset label:has-text('Yes')").all()) {
-    if (await isVisible(radio)) await radio.click().catch(() => {});
+  // ── Yes/No questions — click "Yes" labels ──────────────────────────────────
+  const yesLabels = await page.locator("label:has-text('Yes')").all();
+  for (const label of yesLabels) {
+    if (await isVisible(label)) await label.click().catch(() => {});
+  }
+  // Also handle radio inputs with value "Yes"
+  for (const r of await page.locator("input[type='radio'][value='Yes'], input[type='radio'][value='yes']").all()) {
+    await r.check().catch(() => {});
   }
 
-  // Text/number fields
-  for (const input of await page.locator("input[type='text']:visible, input[type='tel']:visible, input[type='number']:visible").all()) {
+  // ── Text / number / tel inputs ─────────────────────────────────────────────
+  const inputs = await page.locator("input[type='text']:visible, input[type='tel']:visible, input[type='number']:visible").all();
+  for (const input of inputs) {
     const val = await input.inputValue().catch(() => "");
-    if (val) continue;
-    const label = await labelFor(input);
-    if (label.includes("city") || label.includes("location")) await input.fill(profile.location || "Seattle, WA");
-    else if (label.includes("linkedin") || label.includes("profile url")) await input.fill(profile.linkedinUrl || "");
-    else if (label.includes("website") || label.includes("portfolio")) await input.fill(profile.website || "");
-    else if (label.includes("year") || label.includes("experience")) await input.fill(profile.yearsExperience || "5");
-    else if (label.includes("salary") || label.includes("expected")) await input.fill(profile.expectedSalary || "");
+    if (val) continue;   // already filled
+    const lbl = await labelFor(input);
+    if (!lbl) continue;
+    if      (lbl.match(/city|location|address/))         await input.fill(profile.location   || "Seattle, WA").catch(() => {});
+    else if (lbl.match(/linkedin|profile.*url/))          await input.fill(profile.linkedinUrl || "").catch(() => {});
+    else if (lbl.match(/website|portfolio|github/))       await input.fill(profile.website    || "").catch(() => {});
+    else if (lbl.match(/year|experience/))                await input.fill(String(profile.yearsExperience || "5")).catch(() => {});
+    else if (lbl.match(/salary|compensation|expected/))   await input.fill(profile.expectedSalary || "").catch(() => {});
+    else if (lbl.match(/first.*name|fname/))              await input.fill(profile.name?.split(" ")[0] || "").catch(() => {});
+    else if (lbl.match(/last.*name|lname|surname/))       await input.fill(profile.name?.split(" ").slice(1).join(" ") || "").catch(() => {});
   }
 
-  // Dropdowns
+  // ── Dropdowns ──────────────────────────────────────────────────────────────
   for (const sel of await page.locator("select:visible").all()) {
     const current = await sel.inputValue().catch(() => "");
     if (current) continue;
-    const label = await labelFor(sel);
-    if (label.includes("country")) await sel.selectOption({ label: "United States" }).catch(() => {});
-    else if (label.includes("authorize") || label.includes("work in")) await sel.selectOption({ index: 1 }).catch(() => {});
+    const lbl = await labelFor(sel);
+    if      (lbl.includes("country"))                     await sel.selectOption({ label: "United States" }).catch(() => {});
+    else if (lbl.match(/authorize|work.*in|eligible/))    await sel.selectOption({ index: 1 }).catch(() => {});
+    else if (lbl.includes("sponsor"))                     await sel.selectOption({ label: "No" }).catch(() => {});
+    else if (lbl.match(/gender|ethnicity|veteran|disability/)) { /* skip demographic fields */ }
+    else                                                   await sel.selectOption({ index: 1 }).catch(() => {});
   }
 }
 
@@ -556,19 +615,38 @@ async function openWithSimplify(url, job, profile) {
 }
 
 // ─── LinkedIn Easy Apply Direct Scraper ──────────────────────────────────────
-// Logs into LinkedIn, searches for Easy Apply jobs, returns array of job objects.
-// No Apify needed — runs entirely via Playwright.
+// Strategy 1: LinkedIn guest API (no login needed, fast, returns JSON)
+// Strategy 2: Playwright with authenticated session (fallback)
 export async function scrapeLinkedInEasyApply(credentials, titles = [], locations = [], maxJobs = 25) {
-  if (!credentials?.linkedinEmail || !credentials?.linkedinPassword) return [];
+  const jobs = [];
+
+  // ── Strategy 1: Guest API (no auth required) ────────────────────────────────
+  for (const title of titles.slice(0, 5)) {
+    for (const location of locations.slice(0, 2)) {
+      if (jobs.length >= maxJobs) break;
+      try {
+        const guestJobs = await _scrapeLinkedInGuest(title, location, 10);
+        jobs.push(...guestJobs);
+        if (guestJobs.length > 0) {
+          // eslint-disable-next-line no-console
+          console.log(`[LinkedIn Guest] Found ${guestJobs.length} jobs for "${title}" in ${location}`);
+        }
+      } catch { /* fallthrough to Strategy 2 */ }
+    }
+  }
+
+  if (jobs.length > 0) return jobs;
+
+  // ── Strategy 2: Playwright with login (if guest API blocked) ────────────────
+  if (!credentials?.linkedinEmail || !credentials?.linkedinPassword) return jobs;
 
   let context;
   try {
     context = await ensureLinkedInLogin(credentials);
-  } catch (err) {
-    return [];
+  } catch {
+    return jobs;
   }
 
-  const jobs = [];
   const seenUrls = new Set();
 
   for (const title of titles.slice(0, 4)) {
@@ -580,76 +658,161 @@ export async function scrapeLinkedInEasyApply(credentials, titles = [], location
           `https://www.linkedin.com/jobs/search/?` +
           `keywords=${encodeURIComponent(title)}` +
           `&location=${encodeURIComponent(location)}` +
-          `&f_LF=f_AL` +   // Easy Apply filter
-          `&sortBy=R` +     // Most recent
-          `&start=0`;
+          `&f_LF=f_AL` +
+          `&sortBy=DD`;       // date descending
 
         await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        await delay(2500, 500);
-
-        // Scroll to load more results
-        await page.evaluate(() => window.scrollBy(0, 800)).catch(() => {});
+        await delay(3000, 500);
+        await page.evaluate(() => window.scrollBy(0, 600)).catch(() => {});
         await delay(1500, 300);
 
-        // Grab all job cards
-        const jobCards = await page.locator("li.jobs-search-results__list-item, div.job-card-container").all();
+        // Updated card selectors (2024-2025 LinkedIn HTML)
+        const jobCards = await page.locator([
+          "li[data-occludable-job-id]",
+          "li.scaffold-layout__list-item",
+          "div[data-job-id]",
+          ".jobs-search-results__list-item",
+        ].join(", ")).all();
 
-        for (const card of jobCards.slice(0, 15)) {
+        for (const card of jobCards.slice(0, 12)) {
           if (jobs.length >= maxJobs) break;
           try {
-            await card.click();
-            await delay(1500, 400);
+            await card.click({ timeout: 3000 });
+            await delay(1200, 300);
 
-            // Get job URL from the detail pane or card link
-            const jobUrl = await page.locator(
-              "a.job-details-jobs-unified-top-card__job-title-link, a.jobs-apply-button, .jobs-details__main-content a"
-            ).first().getAttribute("href").catch(() => null)
-              || page.url();
+            // Get job ID from the card attribute
+            const jobId = await card.getAttribute("data-occludable-job-id")
+              || await card.getAttribute("data-job-id").catch(() => null);
 
-            const fullUrl = jobUrl?.startsWith("http")
-              ? jobUrl
-              : jobUrl ? `https://www.linkedin.com${jobUrl}` : page.url();
+            const jobUrl = jobId
+              ? `https://www.linkedin.com/jobs/view/${jobId}/`
+              : page.url();
 
-            if (seenUrls.has(fullUrl)) continue;
-            seenUrls.add(fullUrl);
+            if (seenUrls.has(jobUrl)) continue;
+            seenUrls.add(jobUrl);
 
-            // Check Easy Apply badge
-            const easyApplyBtn = page.locator("button.jobs-apply-button").first();
-            const btnText = (await easyApplyBtn.innerText().catch(() => "")).toLowerCase();
-            if (!btnText.includes("easy apply")) continue;
+            // Updated selectors for 2024-2025 LinkedIn
+            const jobTitle = await page.locator([
+              "h1.t-24.t-bold",
+              ".job-details-jobs-unified-top-card__job-title h1",
+              "h2[class*='top-card__title']",
+              ".topcard__title",
+            ].join(", ")).first().innerText().catch(() => "");
 
-            // Scrape title, company, location
-            const jobTitle    = await page.locator(".job-details-jobs-unified-top-card__job-title, h1.t-24").first().innerText().catch(() => "");
-            const company     = await page.locator(".job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name").first().innerText().catch(() => "");
-            const loc         = await page.locator(".job-details-jobs-unified-top-card__bullet, .jobs-unified-top-card__workplace-type").first().innerText().catch(() => location);
-            const description = await page.locator(".jobs-description__content, .show-more-less-html__markup").first().innerText().catch(() => "");
-            const salary      = await page.locator("[class*='salary'], .compensation__salary-range-text").first().innerText().catch(() => "");
+            const company = await page.locator([
+              ".job-details-jobs-unified-top-card__company-name",
+              "a[class*='company-name']",
+              ".topcard__org-name-link",
+              "[data-tracking-control-name='public_jobs_topcard-org-name']",
+            ].join(", ")).first().innerText().catch(() => "");
+
+            const loc = await page.locator([
+              ".job-details-jobs-unified-top-card__bullet",
+              ".topcard__flavor--bullet",
+              "[class*='workplace-type']",
+            ].join(", ")).first().innerText().catch(() => location);
+
+            const description = await page.locator([
+              ".jobs-description__content",
+              ".show-more-less-html__markup",
+              "#job-details",
+              ".description__text",
+            ].join(", ")).first().innerText().catch(() => "");
+
+            // Check if Easy Apply button exists
+            const hasEasyApply = await page.locator([
+              "button.jobs-apply-button",
+              "button[aria-label*='Easy Apply']",
+              ".jobs-apply-button--top-card",
+            ].join(", ")).first().isVisible({ timeout: 1000 }).catch(() => false);
 
             if (!jobTitle || !company) continue;
 
             jobs.push({
-              id:          `li-direct-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+              id:          `li-pw-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
               title:       jobTitle.trim(),
               company:     company.trim(),
               location:    loc.trim() || location,
-              applyUrl:    fullUrl,
-              url:         fullUrl,
+              applyUrl:    jobUrl,
+              url:         jobUrl,
               platform:    "linkedin",
-              easyApply:   true,
+              easyApply:   hasEasyApply,
               description: description.trim().slice(0, 2000),
-              salary:      salary.trim(),
+              salary:      "",
               postedAt:    new Date().toISOString(),
               skills:      [],
               via:         "LinkedIn Direct",
             });
-          } catch { /* skip card errors */ }
+          } catch { /* skip card */ }
         }
-      } catch (err) {
-        // continue to next title/location
-      } finally {
-        await page.close().catch(() => {});
-      }
+      } catch { /* skip title/location */ }
+      finally { await page.close().catch(() => {}); }
     }
+  }
+
+  return jobs;
+}
+
+// ─── LinkedIn Guest API (no auth) ────────────────────────────────────────────
+// Uses LinkedIn's unauthenticated job search endpoint — returns JSON job listings.
+async function _scrapeLinkedInGuest(title, location, limit = 10) {
+  const { default: axios } = await import("axios");
+  const jobs = [];
+
+  // Guest search endpoint (publicly accessible, no auth)
+  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?` +
+    `keywords=${encodeURIComponent(title)}` +
+    `&location=${encodeURIComponent(location)}` +
+    `&f_LF=f_AL` +    // Easy Apply only
+    `&sortBy=DD` +     // Date descending
+    `&start=0`;
+
+  const { data: html } = await axios.get(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept":     "text/html,application/xhtml+xml",
+    },
+    timeout: 20_000,
+  });
+
+  // Parse <li> elements from the HTML response
+  const jobMatches = [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)];
+
+  for (const match of jobMatches.slice(0, limit)) {
+    const li = match[1];
+
+    // Extract job ID
+    const idMatch = li.match(/data-entity-urn="[^"]*:(\d+)"/);
+    const jobId   = idMatch?.[1];
+    if (!jobId) continue;
+
+    // Extract title
+    const titleMatch = li.match(/class="[^"]*base-search-card__title[^"]*"[^>]*>([^<]+)</);
+    const jobTitle   = titleMatch?.[1]?.trim();
+
+    // Extract company
+    const companyMatch = li.match(/class="[^"]*base-search-card__subtitle[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</);
+    const company      = companyMatch?.[1]?.trim();
+
+    // Extract location
+    const locMatch  = li.match(/class="[^"]*job-search-card__location[^"]*"[^>]*>([^<]+)</);
+    const jobLoc    = locMatch?.[1]?.trim() || location;
+
+    if (!jobTitle || !company) continue;
+
+    jobs.push({
+      id:        `li-guest-${jobId}`,
+      title:     jobTitle,
+      company,
+      location:  jobLoc,
+      url:       `https://www.linkedin.com/jobs/view/${jobId}/`,
+      applyUrl:  `https://www.linkedin.com/jobs/view/${jobId}/`,
+      platform:  "linkedin",
+      easyApply: true,
+      postedAt:  new Date().toISOString(),
+      skills:    [],
+      via:       "LinkedIn Guest",
+    });
   }
 
   return jobs;

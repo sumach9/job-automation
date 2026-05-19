@@ -263,124 +263,172 @@ async function runApifyActor(actorId, input) {
 
 // ─── Platform scrapers ────────────────────────────────────────────────────────
 
+// ── LinkedIn via SerpAPI Google Jobs (platform filter) ────────────────────────
 async function scrapeLinkedIn(title, location) {
-  // LinkedIn search URL with Easy Apply filter (f_LF=f_AL) and last 24h (f_TPR=r86400)
-  const searchUrl =
-    `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(title)}` +
-    `&location=${encodeURIComponent(location)}&f_TPR=r86400&f_LF=f_AL`;
-
-  // Try multiple well-known actors in order until one works
-  const actors = [
-    { id: "hemaet~linkedin-jobs-scraper",   input: { startUrls: [{ url: searchUrl }], maxItems: settings.maxApplicationsPerRun } },
-    { id: "bebity~linkedin-jobs-scraper",   input: { startUrls: [{ url: searchUrl }], maxItems: settings.maxApplicationsPerRun } },
-    { id: "curious_coder~linkedin-jobs-scraper", input: { queries: title, location, maxResults: settings.maxApplicationsPerRun } },
-  ];
-
-  for (const actor of actors) {
-    try {
-      const raw = await runApifyActor(actor.id, actor.input);
-      if (!Array.isArray(raw) || raw.length === 0) continue;
-      log("info", `LinkedIn: using actor ${actor.id}`);
-      return raw.map((r) => ({
-        id: `li-${r.jobId || r.id || Date.now() + Math.random()}`,
-        title: r.title || r.jobTitle || title,
-        company: r.companyName || r.company || "Unknown",
-        location: r.location || r.jobLocation || location,
-        url: r.jobUrl || r.url || "",
-        easyApply: r.easyApply ?? true,
-        postedAt: r.postedAt || r.datePosted || new Date().toISOString(),
-        platform: "LinkedIn",
-        description: (r.descriptionHtml || r.description || r.jobDescription || "").replace(/<[^>]+>/g, "").slice(0, 3000),
-        skills: r.skills || [],
-        salary: r.salary || r.salaryInfo || "",
-        workMode: r.workType || r.workplaceType || "",
-        jobType: r.contractType || r.employmentType || "",
-      }));
-    } catch (err) {
-      log("warning", `LinkedIn actor ${actor.id} failed`, err.message);
-    }
+  if (!settings.serpApiKey) {
+    log("warning", "No SerpAPI key — skipping LinkedIn search");
+    return [];
   }
-  log("error", `LinkedIn scrape failed — all actors failed for "${title}"`);
-  stats.errors++;
-  return [];
+  try {
+    const { data } = await axios.get("https://serpapi.com/search", {
+      params: {
+        engine:   "google_jobs",
+        q:        `${title} site:linkedin.com/jobs`,
+        location,
+        chips:    "date_posted:week",
+        hl:       "en",
+        api_key:  settings.serpApiKey,
+      },
+      timeout: 30_000,
+    });
+    const jobs = data.jobs_results || [];
+    log("info", `LinkedIn (SerpAPI): found ${jobs.length} jobs for "${title}"`);
+    return jobs.map((r) => {
+      const applyUrl = (r.apply_options || []).find(l => l.link?.includes("linkedin.com"))?.link
+        || (r.apply_options || [])[0]?.link || "";
+      return {
+        id:          `li-serp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        title:       r.title || title,
+        company:     r.company_name || "Unknown",
+        location:    r.location || location,
+        url:         applyUrl || "",
+        applyUrl:    applyUrl || "",
+        easyApply:   applyUrl.includes("linkedin.com"),
+        postedAt:    r.detected_extensions?.posted_at || new Date().toISOString(),
+        platform:    "LinkedIn",
+        description: (r.description || "").slice(0, 3000),
+        salary:      r.detected_extensions?.salary || "",
+        workMode:    r.detected_extensions?.work_from_home ? "Remote" : "",
+      };
+    });
+  } catch (err) {
+    log("error", `LinkedIn scrape failed for "${title}": ${err.message}`);
+    stats.errors++;
+    return [];
+  }
 }
 
+// ── Indeed via SerpAPI ────────────────────────────────────────────────────────
 async function scrapeIndeed(title, location) {
+  if (!settings.serpApiKey) {
+    log("warning", "No SerpAPI key — skipping Indeed search");
+    return [];
+  }
   try {
-    const raw = await runApifyActor("misceres~indeed-scraper", {
-      queries: [`${title} ${location}`],
-      maxItems: settings.maxApplicationsPerRun,
-      daysOld: 1,
+    const { data } = await axios.get("https://serpapi.com/search", {
+      params: {
+        engine:   "google_jobs",
+        q:        `${title} site:indeed.com`,
+        location,
+        chips:    "date_posted:week",
+        hl:       "en",
+        api_key:  settings.serpApiKey,
+      },
+      timeout: 30_000,
     });
-    return raw.map((r) => ({
-      id: `in-${r.jobKey || r.id || Date.now() + Math.random()}`,
-      title: r.positionName || r.title || title,
-      company: r.company || "Unknown",
-      location: r.location || location,
-      url: r.url || r.jobUrl || "",
-      easyApply: false,
-      postedAt: r.postedAt || r.datePosted || new Date().toISOString(),
-      platform: "Indeed",
-      description: (r.description || "").slice(0, 3000),
-      salary: r.salary || "",
-      jobType: r.jobType || "",
-    }));
+    const jobs = data.jobs_results || [];
+    log("info", `Indeed (SerpAPI): found ${jobs.length} jobs for "${title}"`);
+    return jobs.map((r) => {
+      const applyUrl = (r.apply_options || []).find(l => l.link?.includes("indeed.com"))?.link
+        || (r.apply_options || [])[0]?.link || "";
+      return {
+        id:          `in-serp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        title:       r.title || title,
+        company:     r.company_name || "Unknown",
+        location:    r.location || location,
+        url:         applyUrl || "",
+        applyUrl:    applyUrl || "",
+        easyApply:   false,
+        postedAt:    r.detected_extensions?.posted_at || new Date().toISOString(),
+        platform:    "Indeed",
+        description: (r.description || "").slice(0, 3000),
+        salary:      r.detected_extensions?.salary || "",
+        jobType:     r.detected_extensions?.schedule_type || "",
+      };
+    });
   } catch (err) {
-    log("error", `Indeed scrape failed — ${title}`, err.message);
+    log("error", `Indeed scrape failed for "${title}": ${err.message}`);
     stats.errors++;
     return [];
   }
 }
 
+// ── Glassdoor via SerpAPI ─────────────────────────────────────────────────────
 async function scrapeGlassdoor(title, location) {
+  if (!settings.serpApiKey) return [];
   try {
-    const raw = await runApifyActor("bebity~glassdoor-jobs-scraper", {
-      keyword: title,
-      location,
-      maxItems: settings.maxApplicationsPerRun,
+    const { data } = await axios.get("https://serpapi.com/search", {
+      params: {
+        engine:  "google_jobs",
+        q:       `${title} site:glassdoor.com`,
+        location,
+        chips:   "date_posted:week",
+        hl:      "en",
+        api_key: settings.serpApiKey,
+      },
+      timeout: 30_000,
     });
-    return raw.map((r) => ({
-      id: `gd-${r.jobId || r.id || Date.now() + Math.random()}`,
-      title: r.jobTitle || r.title || title,
-      company: r.employer?.name || r.company || "Unknown",
-      location: r.location || location,
-      url: r.jobLink || r.url || "",
-      easyApply: r.isEasyApply ?? false,
-      postedAt: r.postedDate || r.datePosted || new Date().toISOString(),
-      platform: "Glassdoor",
-      description: (r.description || "").slice(0, 3000),
-      salary: r.salary || r.payPeriod || "",
-    }));
+    const jobs = data.jobs_results || [];
+    log("info", `Glassdoor (SerpAPI): found ${jobs.length} jobs for "${title}"`);
+    return jobs.map((r) => {
+      const applyUrl = (r.apply_options || [])[0]?.link || "";
+      return {
+        id:          `gd-serp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        title:       r.title || title,
+        company:     r.company_name || "Unknown",
+        location:    r.location || location,
+        url:         applyUrl,
+        applyUrl,
+        easyApply:   false,
+        postedAt:    r.detected_extensions?.posted_at || new Date().toISOString(),
+        platform:    "Glassdoor",
+        description: (r.description || "").slice(0, 3000),
+        salary:      r.detected_extensions?.salary || "",
+      };
+    });
   } catch (err) {
-    log("error", `Glassdoor scrape failed — ${title}`, err.message);
+    log("error", `Glassdoor scrape failed for "${title}": ${err.message}`);
     stats.errors++;
     return [];
   }
 }
 
+// ── ZipRecruiter via SerpAPI ──────────────────────────────────────────────────
 async function scrapeZipRecruiter(title, location) {
+  if (!settings.serpApiKey) return [];
   try {
-    const raw = await runApifyActor("bebity~ziprecruiter-scraper", {
-      searchQuery: title,
-      location,
-      maxItems: settings.maxApplicationsPerRun,
-      daysAgo: 1,
+    const { data } = await axios.get("https://serpapi.com/search", {
+      params: {
+        engine:  "google_jobs",
+        q:       `${title} site:ziprecruiter.com`,
+        location,
+        chips:   "date_posted:week",
+        hl:      "en",
+        api_key: settings.serpApiKey,
+      },
+      timeout: 30_000,
     });
-    return raw.map((r) => ({
-      id: `zr-${r.id || Date.now() + Math.random()}`,
-      title: r.title || r.job_title || title,
-      company: r.hiring_company?.name || r.company_name || r.company || "Unknown",
-      location: r.location || r.city || location,
-      url: r.job_url || r.url || r.apply_url || "",
-      easyApply: r.apply_is_easy ?? false,
-      postedAt: r.posted_time || r.posted_at || new Date().toISOString(),
-      platform: "ZipRecruiter",
-      description: (r.snippet || r.description || "").slice(0, 3000),
-      salary: r.salary || r.compensation || "",
-      jobType: r.job_type || "",
-    }));
+    const jobs = data.jobs_results || [];
+    log("info", `ZipRecruiter (SerpAPI): found ${jobs.length} jobs for "${title}"`);
+    return jobs.map((r) => {
+      const applyUrl = (r.apply_options || [])[0]?.link || "";
+      return {
+        id:          `zr-serp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        title:       r.title || title,
+        company:     r.company_name || "Unknown",
+        location:    r.location || location,
+        url:         applyUrl,
+        applyUrl,
+        easyApply:   false,
+        postedAt:    r.detected_extensions?.posted_at || new Date().toISOString(),
+        platform:    "ZipRecruiter",
+        description: (r.description || "").slice(0, 3000),
+        salary:      r.detected_extensions?.salary || "",
+        jobType:     r.detected_extensions?.schedule_type || "",
+      };
+    });
   } catch (err) {
-    log("error", `ZipRecruiter scrape failed — ${title}`, err.message);
+    log("error", `ZipRecruiter scrape failed for "${title}": ${err.message}`);
     stats.errors++;
     return [];
   }
@@ -487,13 +535,17 @@ const seenUrls = new Set(foundJobs.map((j) => j.url).filter(Boolean));
 
 async function scrapeAllPlatforms(title, location) {
   const promises = [];
-  if (settings.apifyToken) {
-    if (settings.platforms.linkedin)     promises.push(scrapeLinkedIn(title, location));
-    if (settings.platforms.indeed)       promises.push(scrapeIndeed(title, location));
-    if (settings.platforms.glassdoor)    promises.push(scrapeGlassdoor(title, location));
-    if (settings.platforms.ziprecruiter) promises.push(scrapeZipRecruiter(title, location));
+  // All platform scrapers now use SerpAPI (no Apify required)
+  if (settings.serpApiKey) {
+    if (settings.platforms.linkedin     !== false) promises.push(scrapeLinkedIn(title, location));
+    if (settings.platforms.indeed       !== false) promises.push(scrapeIndeed(title, location));
+    if (settings.platforms.glassdoor    !== false) promises.push(scrapeGlassdoor(title, location));
+    if (settings.platforms.ziprecruiter !== false) promises.push(scrapeZipRecruiter(title, location));
+    if (settings.platforms.googlejobs   !== false) promises.push(scrapeGoogleJobs(title, location));
+  } else if (settings.platforms.googlejobs !== false) {
+    // No SerpAPI key at all — skip
+    log("warning", "No SerpAPI key configured — job search disabled. Add SERPAPI_KEY to .env");
   }
-  if (settings.platforms.googlejobs) promises.push(scrapeGoogleJobs(title, location));
 
   const results = await Promise.allSettled(promises);
   const all = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
