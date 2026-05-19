@@ -1825,6 +1825,30 @@ function sanitizeSettings(s) {
 import { getLogs, getApplications, getJobs, getPipelineStages } from "./src/storage/db.js";
 import { bootstrap } from "./src/bootstrap.js";
 import { generateOutreach, generateInterviewPrep, analyzeSkillGap } from "./src/ai/prompts/outreach.js";
+import { runOutreachCycle, findRecruiters, closeOutreachBrowser } from "./recruiterOutreach.js";
+
+// ─── Recruiter Outreach State ─────────────────────────────────────────────────
+let outreachLog   = [];   // { recruiter, company, sent, note, sentAt }
+let outreachRunning = false;
+const OUTREACH_FILE = path.join(__dirname, "outreach-log.json");
+
+// Load persisted outreach log on startup
+try {
+  if (fs.existsSync(OUTREACH_FILE)) {
+    outreachLog = JSON.parse(fs.readFileSync(OUTREACH_FILE, "utf8"));
+  }
+} catch { outreachLog = []; }
+
+function saveOutreachLog() {
+  fs.writeFileSync(OUTREACH_FILE, JSON.stringify(outreachLog.slice(0, 500), null, 2));
+}
+
+// Count how many were sent today
+function sentToday() {
+  const today = new Date().toDateString();
+  return outreachLog.filter(r => r.sent && new Date(r.sentAt).toDateString() === today).length;
+}
+
 
 // GET /api/db/jobs — jobs from SQLite (scored, paginated)
 app.get("/api/db/jobs", async (req, res) => {
@@ -1884,6 +1908,76 @@ app.post("/api/ai/skill-gap", async (req, res) => {
     const analysis = await analyzeSkillGap(job, profile);
     res.json({ ok: true, analysis });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Recruiter Outreach Routes ────────────────────────────────────────────────
+
+// GET /api/outreach — get log + stats
+app.get("/api/outreach", (req, res) => {
+  const today = sentToday();
+  const total = outreachLog.filter(r => r.sent).length;
+  const connected = outreachLog.filter(r => r.connected).length;
+  res.json({ ok: true, log: outreachLog.slice(0, 100), stats: { today, total, connected, running: outreachRunning } });
+});
+
+// POST /api/outreach/run — trigger an outreach cycle
+app.post("/api/outreach/run", async (req, res) => {
+  if (outreachRunning) return res.json({ ok: false, message: "Outreach already running" });
+
+  const { companies } = req.body || {};
+  const targetCompanies = companies && companies.length
+    ? companies
+    : ["Amazon", "Microsoft", "Google", "Meta", "Apple", "Expedia", "Salesforce", "Stripe", "Databricks", "Snowflake", "OpenAI", "Adobe", "Nvidia", "Netflix", "Uber", "Lyft", "Airbnb", "Zillow", "T-Mobile", "Boeing"];
+
+  const profile     = settings.profile || {};
+  const credentials = { linkedinEmail: settings.linkedinEmail, linkedinPassword: settings.linkedinPassword };
+
+  if (!credentials.linkedinEmail || !credentials.linkedinPassword) {
+    return res.status(400).json({ ok: false, message: "LinkedIn credentials not configured in Settings" });
+  }
+
+  const todaySent = sentToday();
+  if (todaySent >= 10) {
+    return res.json({ ok: false, message: `Daily limit reached (${todaySent}/10 sent today). Try again tomorrow.` });
+  }
+
+  res.json({ ok: true, message: `Starting outreach to ${targetCompanies.length} companies (${10 - todaySent} slots remaining today)` });
+
+  // Run async in background
+  outreachRunning = true;
+  runOutreachCycle(credentials, profile, targetCompanies, todaySent)
+    .then(({ results, totalSent }) => {
+      outreachLog.unshift(...results);
+      if (outreachLog.length > 500) outreachLog.splice(500);
+      saveOutreachLog();
+      log("success", `Recruiter outreach complete: ${totalSent} connection requests sent`);
+    })
+    .catch(err => log("error", `Outreach cycle error: ${err.message}`))
+    .finally(() => { outreachRunning = false; });
+});
+
+// POST /api/outreach/find — just search for recruiters (no send)
+app.post("/api/outreach/find", async (req, res) => {
+  const { company, title = "Technical Recruiter" } = req.body || {};
+  if (!company) return res.status(400).json({ ok: false, message: "company required" });
+  const credentials = { linkedinEmail: settings.linkedinEmail, linkedinPassword: settings.linkedinPassword };
+  if (!credentials.linkedinEmail) return res.status(400).json({ ok: false, message: "LinkedIn credentials not configured" });
+  try {
+    const recruiters = await findRecruiters(credentials, company, title, 10);
+    res.json({ ok: true, recruiters });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PATCH /api/outreach/:index/connected — mark someone as connected
+app.patch("/api/outreach/:index/connected", (req, res) => {
+  const i = parseInt(req.params.index);
+  if (outreachLog[i]) {
+    outreachLog[i].connected = true;
+    saveOutreachLog();
+  }
+  res.json({ ok: true });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

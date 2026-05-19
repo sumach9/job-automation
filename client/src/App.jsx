@@ -47,6 +47,7 @@ const NAV = [
   { id:"jobs",         label:"Jobs",          icon:"M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" },
   { id:"pipeline",     label:"Pipeline",      icon:"M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" },
   { id:"applications", label:"Applications",  icon:"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
+  { id:"outreach",     label:"Outreach",      icon:"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" },
   { id:"settings",     label:"Settings",      icon:"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
 ];
 
@@ -837,6 +838,160 @@ function LoginPage({ onLogin }) {
   );
 }
 
+// ─── Outreach Page ────────────────────────────────────────────────────────────
+function OutreachPage({ showToast, profile }) {
+  const [stats, setStats]         = useState({ today:0, total:0, connected:0, running:false });
+  const [log, setLog]             = useState([]);
+  const [companies, setCompanies] = useState("Amazon, Microsoft, Google, Meta, Expedia, Salesforce, Databricks, Snowflake, Adobe, Nvidia");
+  const [loading, setLoading]     = useState(false);
+
+  const fetchOutreach = async () => {
+    try {
+      const d = await apiFetch(`${API}/outreach`).then(r=>r.json());
+      if (d.ok) { setStats(d.stats); setLog(d.log||[]); }
+    } catch {}
+  };
+
+  useEffect(() => { fetchOutreach(); }, []);
+
+  const startOutreach = async () => {
+    setLoading(true);
+    try {
+      const companyList = companies.split(",").map(c=>c.trim()).filter(Boolean);
+      const d = await apiFetch(`${API}/outreach/run`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ companies: companyList }),
+      }).then(r=>r.json());
+      showToast(d.message, d.ok ? "success" : "error");
+      if (d.ok) setTimeout(fetchOutreach, 5000);
+    } catch(e) { showToast("Outreach failed: "+e.message,"error"); }
+    finally { setLoading(false); }
+  };
+
+  const statBox = (label, val, color="#1c1917") => (
+    <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:10, padding:"16px 22px", minWidth:110, textAlign:"center" }}>
+      <div style={{ fontSize:26, fontWeight:700, color }}>{val}</div>
+      <div style={{ fontSize:12, color:"#78716c", marginTop:2 }}>{label}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth:900 }}>
+      <div style={{ marginBottom:24 }}>
+        <h2 style={{ fontSize:22, fontWeight:700, color:"#1c1917", margin:0 }}>Recruiter Outreach</h2>
+        <p style={{ color:"#78716c", marginTop:4, fontSize:14 }}>
+          Automatically find recruiters at target companies and send personalized LinkedIn connection requests (max 10/day to keep your account safe).
+        </p>
+      </div>
+
+      {/* Stats */}
+      <div style={{ display:"flex", gap:12, marginBottom:28, flexWrap:"wrap" }}>
+        {statBox("Sent Today",   stats.today,     "#2563eb")}
+        {statBox("Total Sent",   stats.total,     "#1c1917")}
+        {statBox("Connected",    stats.connected, "#16a34a")}
+        {statBox("Daily Limit",  10,              "#78716c")}
+      </div>
+
+      {/* How it works */}
+      <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:10, padding:"14px 18px", marginBottom:24, fontSize:13, color:"#0369a1" }}>
+        <strong>How it works:</strong> JobPilot searches LinkedIn for Technical Recruiters and Talent Acquisition staff at your target companies, then sends them a personalized connection request using your profile. Responses and connections are tracked below.
+      </div>
+
+      {/* Target companies */}
+      <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:10, padding:20, marginBottom:20 }}>
+        <label style={{ display:"block", fontWeight:600, fontSize:13, marginBottom:8, color:"#1c1917" }}>
+          Target Companies (comma-separated)
+        </label>
+        <textarea
+          value={companies}
+          onChange={e=>setCompanies(e.target.value)}
+          rows={3}
+          style={{ width:"100%", border:"1px solid #d6d3d1", borderRadius:8, padding:"10px 12px", fontSize:13, fontFamily:"inherit", resize:"vertical", boxSizing:"border-box" }}
+          placeholder="Amazon, Microsoft, Google, Meta..."
+        />
+        <div style={{ marginTop:12, display:"flex", gap:10, alignItems:"center" }}>
+          <button
+            onClick={startOutreach}
+            disabled={loading || stats.running || stats.today>=10}
+            style={{ background: loading||stats.running||stats.today>=10 ? "#d1d5db" : "#1c1917", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontWeight:600, cursor: loading||stats.running||stats.today>=10 ? "not-allowed":"pointer", fontSize:14 }}
+          >
+            {loading || stats.running ? "Running..." : stats.today>=10 ? "Daily limit reached" : "Start Outreach"}
+          </button>
+          <button onClick={fetchOutreach} style={{ background:"none", border:"1px solid #e5e3e0", borderRadius:8, padding:"9px 16px", fontSize:13, cursor:"pointer", color:"#78716c" }}>
+            Refresh
+          </button>
+          <span style={{ fontSize:12, color:"#78716c" }}>{10 - stats.today} slots remaining today</span>
+        </div>
+      </div>
+
+      {/* Outreach log */}
+      <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:10, overflow:"hidden" }}>
+        <div style={{ padding:"14px 20px", borderBottom:"1px solid #e5e3e0", fontWeight:600, fontSize:13, color:"#1c1917" }}>
+          Outreach Log ({log.length})
+        </div>
+        {log.length === 0 ? (
+          <div style={{ padding:40, textAlign:"center", color:"#a8a29e", fontSize:14 }}>
+            No outreach sent yet. Click "Start Outreach" to begin.
+          </div>
+        ) : (
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+              <thead>
+                <tr style={{ background:"#fafaf9", borderBottom:"1px solid #e5e3e0" }}>
+                  {["Recruiter","Company","Title","Status","Note","Sent At"].map(h=>(
+                    <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontWeight:600, color:"#78716c", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {log.map((r,i)=>(
+                  <tr key={i} style={{ borderBottom:"1px solid #f0efed" }}>
+                    <td style={{ padding:"10px 14px", fontWeight:500, color:"#1c1917" }}>
+                      {r.profileUrl ? <a href={r.profileUrl} target="_blank" rel="noreferrer" style={{ color:"#2563eb", textDecoration:"none" }}>{r.recruiter||"—"}</a> : (r.recruiter||"—")}
+                    </td>
+                    <td style={{ padding:"10px 14px", color:"#44403c" }}>{r.company||"—"}</td>
+                    <td style={{ padding:"10px 14px", color:"#78716c", maxWidth:160, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.title||"—"}</td>
+                    <td style={{ padding:"10px 14px" }}>
+                      {r.connected
+                        ? <span style={{ background:"#dcfce7", color:"#16a34a", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:11 }}>Connected</span>
+                        : r.sent
+                          ? <span style={{ background:"#dbeafe", color:"#2563eb", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:11 }}>Sent</span>
+                          : <span style={{ background:"#fee2e2", color:"#dc2626", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:11 }}>Failed</span>
+                      }
+                    </td>
+                    <td style={{ padding:"10px 14px", color:"#78716c", maxWidth:200, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.note}>{r.note||"—"}</td>
+                    <td style={{ padding:"10px 14px", color:"#a8a29e", whiteSpace:"nowrap", fontSize:11 }}>{r.sentAt ? new Date(r.sentAt).toLocaleString() : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Platform suggestions */}
+      <div style={{ marginTop:24, padding:"16px 20px", background:"#fff", border:"1px solid #e5e3e0", borderRadius:10 }}>
+        <div style={{ fontWeight:600, fontSize:13, color:"#1c1917", marginBottom:10 }}>Also: Create a Profile on These Platforms (Recruiters Search Here)</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:10 }}>
+          {[
+            { name:"Hired.com", url:"https://hired.com", desc:"Companies bid on you — best for $100k+ roles" },
+            { name:"Wellfound", url:"https://wellfound.com", desc:"Startup jobs — YC-backed companies" },
+            { name:"Dice", url:"https://dice.com", desc:"Tech-specific — recruiters search daily" },
+            { name:"Indeed Resume", url:"https://indeed.com/create-resume", desc:"Make yourself searchable on Indeed" },
+            { name:"Otta", url:"https://otta.com", desc:"Curated tech roles — no noise" },
+          ].map(p=>(
+            <a key={p.name} href={p.url} target="_blank" rel="noreferrer" style={{ display:"flex", flexDirection:"column", padding:"12px 16px", border:"1px solid #e5e3e0", borderRadius:8, textDecoration:"none", minWidth:160, background:"#fafaf9" }}>
+              <span style={{ fontWeight:600, color:"#1c1917", fontSize:13 }}>{p.name}</span>
+              <span style={{ color:"#78716c", fontSize:11, marginTop:3 }}>{p.desc}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(false);
@@ -1405,6 +1560,11 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* ── OUTREACH ──────────────────────────────────────────────────── */}
+            {tab==="outreach" && (
+              <OutreachPage showToast={showToast} profile={settings?.profile||{}} />
             )}
 
             {/* ── SETTINGS ──────────────────────────────────────────────────── */}
