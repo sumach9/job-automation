@@ -5,8 +5,14 @@
 import { log } from "../../logging/logger.js";
 
 // Lazy-load providers so missing API keys don't crash the app
+// Priority: Groq (fastest) → Anthropic → OpenAI
 async function getProviders() {
   const providers = [];
+
+  if (process.env.GROQ_API_KEY) {
+    const { GroqProvider } = await import("../providers/groq.js");
+    providers.push(new GroqProvider());
+  }
 
   if (process.env.ANTHROPIC_API_KEY) {
     const { AnthropicProvider } = await import("../providers/anthropic.js");
@@ -144,7 +150,7 @@ Candidate skills: ${(profile.skills || []).slice(0, 10).join(", ")}
 Candidate experience: ${profile.yearsExperience || 0} years
 
 Format: numbered list, one line each. Focus on STAR-method highlights.`;
-    return this.complete(prompt, { maxTokens: 400 });
+    return this.complete(prompt, { maxTokens: 400, model: "llama-3.3-70b-versatile" });
   }
 
   /**
