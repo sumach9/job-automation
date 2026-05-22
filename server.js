@@ -15,6 +15,7 @@ import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES
 import { scoreJob, scoreLabel, scoreColor } from "./scorer.js";
 import { generateViralImage } from "./imageGen.js";
 import { parseResume } from "./resumeParser.js";
+import { scrapeTickBig, invalidateTickBigToken } from "./tickbigScraper.js";
 
 dotenv.config();
 
@@ -166,7 +167,9 @@ const settings = {
   maxApplicationsPerRun: parseInt(process.env.MAX_APPS_PER_RUN || "10", 10),
   maxBrowserOpensPerCycle: parseInt(process.env.MAX_BROWSER_OPENS || "5", 10),
   emailNotifications: process.env.EMAIL_NOTIFICATIONS === "true",
-  platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true },
+  platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true, tickbig: true },
+  tickbigEmail:    process.env.TICKBIG_EMAIL    || "",
+  tickbigPassword: process.env.TICKBIG_PASSWORD || "",
   autoApplyEnabled: process.env.AUTO_APPLY_ENABLED === "true",
   apifyToken: process.env.APIFY_TOKEN || "",
   serpApiKey: process.env.SERPAPI_KEY || "",
@@ -494,6 +497,26 @@ async function scrapeGoogleJobs(title, location) {
   }
 }
 
+// ─── TickBig via REST API ─────────────────────────────────────────────────────
+async function scrapeTickBigJobs(title, location) {
+  if (!settings.tickbigEmail || !settings.tickbigPassword) return [];
+  try {
+    const jobs = await scrapeTickBig(
+      settings.tickbigEmail,
+      settings.tickbigPassword,
+      title,
+      location,
+      2  // 2 pages = 40 jobs max per query
+    );
+    log("info", `TickBig: found ${jobs.length} jobs for "${title}" in ${location || "any"}`);
+    return jobs;
+  } catch (err) {
+    log("error", `TickBig scrape failed for "${title}": ${err.message}`);
+    stats.errors++;
+    return [];
+  }
+}
+
 function parsePostedAt(text) {
   // "3 hours ago" → ms
   if (!text) return 0;
@@ -545,6 +568,11 @@ async function scrapeAllPlatforms(title, location) {
   } else if (settings.platforms.googlejobs !== false) {
     // No SerpAPI key at all — skip
     log("warning", "No SerpAPI key configured — job search disabled. Add SERPAPI_KEY to .env");
+  }
+
+  // TickBig runs independently of SerpAPI (uses its own REST API)
+  if (settings.platforms.tickbig !== false && settings.tickbigEmail) {
+    promises.push(scrapeTickBigJobs(title, location));
   }
 
   const results = await Promise.allSettled(promises);
@@ -1022,6 +1050,18 @@ app.post("/api/settings", (req, res) => {
   for (const key of allowed) {
     if (req.body[key] !== undefined) settings[key] = req.body[key];
   }
+  // Credential fields — only update if provided
+  const credFields = ["serpApiKey", "apifyToken", "emailPass", "linkedinEmail", "linkedinPassword", "tickbigEmail", "tickbigPassword"];
+  let tickbigChanged = false;
+  for (const key of credFields) {
+    if (req.body[key] !== undefined) {
+      if ((key === "tickbigEmail" || key === "tickbigPassword") && req.body[key] !== settings[key]) {
+        tickbigChanged = true;
+      }
+      settings[key] = req.body[key];
+    }
+  }
+  if (tickbigChanged) invalidateTickBigToken();
   if (isRunning) { stopScheduler(); startScheduler(); }
   log("info", "Settings updated");
   res.json({ ok: true, settings: sanitizeSettings(settings) });
@@ -1809,13 +1849,14 @@ app.get("*", (req, res) => {
 });
 
 function sanitizeSettings(s) {
-  const { emailPass, apifyToken, serpApiKey, linkedinPassword, ...safe } = s;
+  const { emailPass, apifyToken, serpApiKey, linkedinPassword, tickbigPassword, ...safe } = s;
   return {
     ...safe,
-    emailConfigured: !!emailPass,
-    apifyConfigured: !!apifyToken,
-    serpApiConfigured: !!serpApiKey,
+    emailConfigured:    !!emailPass,
+    apifyConfigured:    !!apifyToken,
+    serpApiConfigured:  !!serpApiKey,
     linkedinConfigured: !!linkedinPassword && !!s.linkedinEmail,
+    tickbigConfigured:  !!tickbigPassword  && !!s.tickbigEmail,
   };
 }
 
@@ -1907,6 +1948,16 @@ app.post("/api/ai/skill-gap", async (req, res) => {
     const { job, profile } = req.body;
     const analysis = await analyzeSkillGap(job, profile);
     res.json({ ok: true, analysis });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// POST /api/ai/cover-letter — generate tailored cover letter
+app.post("/api/ai/cover-letter", async (req, res) => {
+  try {
+    const { job, profile } = req.body;
+    const { aiRouter } = await import("./src/ai/router/index.js");
+    const letter = await aiRouter.generateCoverLetter(job || {}, profile || settings.profile);
+    res.json({ ok: true, letter });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

@@ -1719,6 +1719,17 @@ export default function App() {
                       {settingsForm.emailNotifications && (
                         <Field label="Notification email"><input style={inp} type="email" value={settingsForm.notifyEmail||""} onChange={e=>setSettingsForm(f=>({...f,notifyEmail:e.target.value}))}/></Field>
                       )}
+                      {/* TickBig credentials */}
+                      <div style={{ background:"#fef9f0", borderRadius:10, padding:"14px 16px", border:"1px solid #fde68a", marginTop:4, marginBottom:2 }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:"#92400e", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+                          <span>🔐</span> TickBig Credentials
+                          <span style={{ fontWeight:400, color:"#a16207", fontSize:11 }}>(browse jobs only — applying requires payment on site)</span>
+                        </div>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                          <Field label="TickBig Email"><input style={inp} type="email" placeholder="your@email.com" value={settingsForm.tickbigEmail||""} onChange={e=>setSettingsForm(f=>({...f,tickbigEmail:e.target.value}))}/></Field>
+                          <Field label="TickBig Password"><input style={inp} type="password" placeholder="••••••••" value={settingsForm.tickbigPassword||""} onChange={e=>setSettingsForm(f=>({...f,tickbigPassword:e.target.value}))}/></Field>
+                        </div>
+                      </div>
                       <div style={{ display:"flex", gap:10 }}>
                         <button onClick={saveSettings} style={{ padding:"9px 22px", borderRadius:8, border:"none", background:"#1c1917", color:"#fff", fontWeight:600, fontSize:13, cursor:"pointer" }}>Save</button>
                         <button onClick={async()=>{const d=await apiFetch(`${API}/test-email`,{method:"POST"}).then(r=>r.json());showToast(d.ok?"Test email sent!":d.message,d.ok?"success":"error");}} style={{ padding:"9px 16px", borderRadius:8, border:"1px solid #e5e3e0", background:"transparent", color:"#57534e", fontSize:13, cursor:"pointer" }}>Test Email</button>
@@ -1734,6 +1745,7 @@ export default function App() {
                           ["APIFY_TOKEN", settings?.apifyConfigured, "Job scraping"],
                           ["SERPAPI_KEY", settings?.serpApiConfigured, "Google Jobs"],
                           ["LINKEDIN credentials", settings?.linkedinConfigured, "Auto-apply"],
+                          ["TICKBIG credentials", settings?.tickbigConfigured, "Job scraping (paid-to-apply)"],
                           ["Email (Gmail)", settings?.emailConfigured, "Notifications"],
                           ["RESUME_PATH", !!settings?.profile?.resumePath, "File"],
                         ].map(([key,ok,desc]) => (
