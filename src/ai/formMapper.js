@@ -11,25 +11,60 @@
 import { aiRouter } from "./router/index.js";
 import { log } from "../logging/logger.js";
 
-// ── System prompt sent to Claude ─────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are an expert job application assistant. Your task is to map an applicant's resume data to a web form's input fields.
+// ── System prompt sent to Groq/Claude ────────────────────────────────────────
+const SYSTEM_PROMPT = `You are an expert job application assistant. Fill a web application form using the applicant's profile data.
 
-You will receive:
-1. A JSON array of form fields, each with: id, name, type, placeholder, label, ariaLabel
-2. The applicant's profile/resume data
-3. The job title and company name
+INPUT:
+1. Form fields JSON array — each field has: id, name, type, placeholder, label, ariaLabel, options (for selects/radios)
+2. Applicant profile
+3. Job title + company
 
-Return a SINGLE valid JSON object where:
-- Keys are the field "id" or "name" attribute (prefer "id" if present, else "name")
-- Values are the exact strings to type into each field
-- Omit fields you cannot confidently fill (passwords, CAPTCHA, unknown fields)
-- For file upload fields (type="file"), use the key "_resume_upload" with value "USE_RESUME_PATH"
-- For cover letter / message fields, write a brief 2-3 sentence cover letter
-- For select/dropdown fields, use the most appropriate option value
-- For checkboxes that mean "yes I agree" or "I am authorized to work", use "true"
-- For years of experience fields, use a number string like "5"
+OUTPUT RULES — return a SINGLE raw JSON object, no markdown:
+- Keys = field "id" (prefer) or "name" attribute
+- Values = exact string/value to fill
 
-Output ONLY the raw JSON object, no markdown, no explanation.`;
+FIELD TYPE RULES:
+• text / email / tel / url / textarea  → fill with the matching profile value
+• type="file" → use key "_resume_upload" with value "USE_RESUME_PATH"
+• select (dropdown) → use the matching option VALUE (not display text)
+• radio button group → all radios share the same "name"; return { "name_attr": "value_to_select" }
+• checkbox → "true" to check, "false" to leave unchecked
+
+QUESTION PATTERN MATCHING:
+• Full name / your name → profile.name
+• First name → profile.firstName
+• Last name → profile.lastName
+• Email → profile.email
+• Phone → profile.phone
+• LinkedIn URL → profile.linkedinUrl
+• Portfolio / GitHub → profile.website or profile.github
+• Resume upload → "_resume_upload": "USE_RESUME_PATH"
+• Years of Python / SQL / language experience → pick the matching range from profile.yearsExperience and skills
+• What % of day coding → profile.codingPercentage (e.g. "75%")
+• "Why are you interested in joining [company]?" → generate 2-3 genuine sentences using profile.summary, skills, and the company name
+• "Example aligning with our values / cultural fit" → generate 2-3 sentences from profile.recentExperience showing ownership, collaboration, or innovation
+• "Tell us about yourself" / "additional info" → profile.summary
+
+LOCATION / OFFICE QUESTIONS:
+• "Are you located within 50 miles of [city hubs]?" → pick the option matching profile.preferredOfficeHub; if not listed pick "No, but willing to relocate" if profile.willingToRelocate else "No, and not willing to relocate"
+• "Can you work in-person 2-3 days/week?" → profile.inPersonOk → "Yes" or "No"
+
+WORK AUTHORIZATION (always answer based on profile):
+• "Are you at least 18?" → profile.isOver18 → "Yes" or "No"
+• "Legally authorized to work?" / "work authorization" → profile.workAuthorized → "Yes" or "No"
+• "Require visa sponsorship now or future?" → profile.requiresSponsorship → "Yes" or "No"
+
+EEO / SELF-IDENTIFICATION (voluntary — use profile values, default to Decline):
+• Gender → profile.gender (e.g. "Female", "Male", "Decline to self-identify")
+• Race / ethnicity → profile.race (e.g. "Asian (Not Hispanic or Latino)", "Decline to self-identify")
+• Veteran status → profile.veteranStatus (e.g. "I am not a protected veteran", "I decline to self-identify for protected veteran status")
+• Disability status → profile.disability (e.g. "I don't wish to answer")
+
+IMPORTANT:
+- Never fill password, CAPTCHA, payment, or SSN fields
+- For radio groups, return ONE entry per group: { "group_name": "selected_value" }
+- Omit fields you cannot confidently map
+- Output ONLY the raw JSON object — no explanation, no markdown fences`;
 
 // ── Extract form field metadata from a Playwright page ───────────────────────
 /**
@@ -145,6 +180,26 @@ export async function aiMapFields(formFields, profile, job = {}) {
     summary:          (profile.summary || "").slice(0, 400),
     recentExperience: (profile.experiences || []).slice(0, 2).map(e =>
       `${e.title || ""} at ${e.company || ""} (${e.duration || ""})`).join("; "),
+    // ── Work Authorization ──────────────────────────────────────────────────
+    isOver18:              profile.isOver18            ?? true,
+    workAuthorized:        profile.workAuthorized       ?? true,
+    requiresSponsorship:   profile.requiresSponsorship  ?? false,
+    // ── Location / Office ───────────────────────────────────────────────────
+    preferredOfficeHub:    profile.preferredOfficeHub   || "Seattle, Washington",
+    willingToRelocate:     profile.willingToRelocate    ?? true,
+    inPersonOk:            profile.inPersonOk           ?? true,
+    // ── EEO ─────────────────────────────────────────────────────────────────
+    gender:                profile.gender               || "Decline to self-identify",
+    race:                  profile.race                 || "Decline to self-identify",
+    veteranStatus:         profile.veteranStatus        || "I am not a protected veteran",
+    disability:            profile.disability           || "I don't wish to answer",
+    // ── Skill detail questions ───────────────────────────────────────────────
+    pythonYears:           profile.pythonYears          || "5 - 7 years",
+    codingPercentage:      profile.codingPercentage     || "75%",
+    // ── Pre-written open-text answers ────────────────────────────────────────
+    whyJoinAnswer:         (profile.whyJoinAnswer        || "").slice(0, 600),
+    culturalValuesAnswer:  (profile.culturalValuesAnswer || "").slice(0, 600),
+    additionalInfo:        (profile.additionalInfo       || "").slice(0, 400),
   };
 
   const prompt = `Job Title: ${job.title || "Software Engineer"}

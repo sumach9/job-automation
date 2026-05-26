@@ -208,6 +208,26 @@ const settings = {
       resumePath:      p.resumePath      || process.env.RESUME_PATH || "",
       resumeFileName:  p.resumeFileName  || "",
       savedAt:         p.savedAt         || null,
+      // ── Work Authorization ──────────────────────────────────────────────
+      isOver18:              p.isOver18              ?? true,
+      workAuthorized:        p.workAuthorized        ?? true,
+      requiresSponsorship:   p.requiresSponsorship   ?? false,
+      // ── Location & Office Preferences ──────────────────────────────────
+      willingToRelocate:     p.willingToRelocate     ?? true,
+      preferredOfficeHub:    p.preferredOfficeHub    || "Seattle, Washington",
+      inPersonOk:            p.inPersonOk            ?? true,
+      // ── EEO / Self-Identification (all default to Decline) ──────────────
+      gender:                p.gender                || "Decline to self-identify",
+      race:                  p.race                  || "Decline to self-identify",
+      veteranStatus:         p.veteranStatus         || "I am not a protected veteran",
+      disability:            p.disability            || "I don't wish to answer",
+      // ── Skills / Experience detail questions ────────────────────────────
+      pythonYears:           p.pythonYears           || "5 - 7 years",
+      codingPercentage:      p.codingPercentage      || "75%",
+      // ── Open-text application answers ──────────────────────────────────
+      whyJoinAnswer:         p.whyJoinAnswer         || "",  // "Why are you interested in joining X?"
+      culturalValuesAnswer:  p.culturalValuesAnswer  || "",  // cultural fit / values example
+      additionalInfo:        p.additionalInfo        || "",
     };
   })(),
 };
@@ -1080,7 +1100,17 @@ app.post("/api/profile", (req, res) => {
     "linkedinUrl","github","website","school","degree","major",
     "yearsExperience","expectedSalary","skills","targetRoles",
     "remotePreference","summary","coverLetter","resumePath","resumeFileName","zipCode",
-    "education","experiences"];
+    "education","experiences",
+    // Work auth
+    "isOver18","workAuthorized","requiresSponsorship",
+    // Location / office
+    "willingToRelocate","preferredOfficeHub","inPersonOk",
+    // EEO
+    "gender","race","veteranStatus","disability",
+    // Skills detail
+    "pythonYears","codingPercentage",
+    // Open-text
+    "whyJoinAnswer","culturalValuesAnswer","additionalInfo"];
   for (const f of fields) {
     if (p[f] !== undefined) settings.profile[f] = p[f];
   }

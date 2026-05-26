@@ -1612,6 +1612,95 @@ export default function App() {
                       </Field>
                     </div>
 
+                    {/* Work Authorization */}
+                    <div style={{ background:"#fff", borderRadius:14, padding:"22px 24px", border:"1px solid #e5e3e0" }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:"#1c1917", marginBottom:14 }}>Work Authorization & Location</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:14 }}>
+                        <Field label="Over 18?">
+                          <select style={inp} value={settingsForm.profile?.isOver18===false?"No":"Yes"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,isOver18:e.target.value==="Yes"}}))}>
+                            <option>Yes</option><option>No</option>
+                          </select>
+                        </Field>
+                        <Field label="Authorized to work?">
+                          <select style={inp} value={settingsForm.profile?.workAuthorized===false?"No":"Yes"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,workAuthorized:e.target.value==="Yes"}}))}>
+                            <option>Yes</option><option>No</option>
+                          </select>
+                        </Field>
+                        <Field label="Needs visa sponsorship?">
+                          <select style={inp} value={settingsForm.profile?.requiresSponsorship?"Yes":"No"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,requiresSponsorship:e.target.value==="Yes"}}))}>
+                            <option>No</option><option>Yes</option>
+                          </select>
+                        </Field>
+                        <Field label="Willing to relocate?">
+                          <select style={inp} value={settingsForm.profile?.willingToRelocate===false?"No":"Yes"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,willingToRelocate:e.target.value==="Yes"}}))}>
+                            <option>Yes</option><option>No</option>
+                          </select>
+                        </Field>
+                        <Field label="In-person 2-3 days/wk?">
+                          <select style={inp} value={settingsForm.profile?.inPersonOk===false?"No":"Yes"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,inPersonOk:e.target.value==="Yes"}}))}>
+                            <option>Yes</option><option>No</option>
+                          </select>
+                        </Field>
+                        <Field label="Preferred office hub">
+                          <select style={inp} value={settingsForm.profile?.preferredOfficeHub||"Seattle, Washington"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,preferredOfficeHub:e.target.value}}))}>
+                            {["Seattle, Washington","San Francisco (Union Square)","New York (1 Penn)","London, UK","No, but willing to relocate","No, and not willing to relocate"].map(v=><option key={v}>{v}</option>)}
+                          </select>
+                        </Field>
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                        <Field label="Python years experience">
+                          <select style={inp} value={settingsForm.profile?.pythonYears||"5 - 7 years"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,pythonYears:e.target.value}}))}>
+                            {["0 - 3 years","3 - 5 years","5 - 7 years","7+ years"].map(v=><option key={v}>{v}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="% day coding">
+                          <select style={inp} value={settingsForm.profile?.codingPercentage||"75%"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,codingPercentage:e.target.value}}))}>
+                            {["0%","25%","50%","75%","100%"].map(v=><option key={v}>{v}</option>)}
+                          </select>
+                        </Field>
+                      </div>
+                    </div>
+
+                    {/* EEO Self-Identification */}
+                    <div style={{ background:"#fff", borderRadius:14, padding:"22px 24px", border:"1px solid #e5e3e0" }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:"#1c1917", marginBottom:4 }}>EEO Self-Identification</div>
+                      <div style={{ fontSize:12, color:"#a8a29e", marginBottom:14 }}>Used for voluntary EEO sections on job applications. Defaults to "Decline to self-identify".</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
+                        <Field label="Gender">
+                          <select style={inp} value={settingsForm.profile?.gender||"Decline to self-identify"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,gender:e.target.value}}))}>
+                            {["Decline to self-identify","Female","Male"].map(v=><option key={v}>{v}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Race / Ethnicity">
+                          <select style={inp} value={settingsForm.profile?.race||"Decline to self-identify"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,race:e.target.value}}))}>
+                            {["Decline to self-identify","Asian (Not Hispanic or Latino)","White (Not Hispanic or Latino)","Black or African American (Not Hispanic or Latino)","Hispanic or Latino","Two or More Races (Not Hispanic or Latino)","Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)","American Indian or Alaska Native (Not Hispanic or Latino)"].map(v=><option key={v}>{v}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Veteran Status">
+                          <select style={inp} value={settingsForm.profile?.veteranStatus||"I am not a protected veteran"} onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,veteranStatus:e.target.value}}))}>
+                            {["I am not a protected veteran","I decline to self-identify for protected veteran status","I identify as one or more of the classifications of protected veteran listed above"].map(v=><option key={v}>{v}</option>)}
+                          </select>
+                        </Field>
+                      </div>
+                    </div>
+
+                    {/* Open-text Application Answers */}
+                    <div style={{ background:"#fff", borderRadius:14, padding:"22px 24px", border:"1px solid #e5e3e0" }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:"#1c1917", marginBottom:4 }}>Application Essay Answers</div>
+                      <div style={{ fontSize:12, color:"#a8a29e", marginBottom:14 }}>Pre-written answers for common open-text questions. The AI will personalise these for each company.</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                        <Field label={`"Why are you interested in joining [company]?"`}>
+                          <textarea style={ta} rows={3} value={settingsForm.profile?.whyJoinAnswer||""} placeholder="I'm excited to join [company] because…" onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,whyJoinAnswer:e.target.value}}))} />
+                        </Field>
+                        <Field label={`"Describe an experience aligning with our values / culture"`}>
+                          <textarea style={ta} rows={3} value={settingsForm.profile?.culturalValuesAnswer||""} placeholder="At my previous role at [company], I demonstrated ownership by…" onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,culturalValuesAnswer:e.target.value}}))} />
+                        </Field>
+                        <Field label="Additional Information (catch-all)">
+                          <textarea style={ta} rows={2} value={settingsForm.profile?.additionalInfo||""} placeholder="Any additional context you'd like to share…" onChange={e=>setSettingsForm(f=>({...f,profile:{...f.profile,additionalInfo:e.target.value}}))} />
+                        </Field>
+                      </div>
+                    </div>
+
                     {/* Education */}
                     <div style={{ background:"#fff", borderRadius:14, padding:"22px 24px", border:"1px solid #e5e3e0" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
