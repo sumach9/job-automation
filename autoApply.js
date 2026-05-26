@@ -4,6 +4,7 @@ import path from "path";
 import os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { extractFormFields, aiMapFields, applyFieldMapping } from "./src/ai/formMapper.js";
 
 const execAsync = promisify(exec);
 
@@ -49,14 +50,32 @@ export async function smartApply({ job, credentials, profile, resumePath }) {
   const applyUrl = job.applyUrl || job.url || "";
   const platform = detectPlatform(applyUrl);
 
+  // LinkedIn Easy Apply — only works if the URL is a direct job post (not a search page)
+  // SerpAPI returns linkedin.com/jobs/view/... URLs which have an Easy Apply button
   if (platform === "linkedin") {
+    if (!credentials?.linkedinEmail) {
+      return { success: false, reason: "No LinkedIn credentials — set LINKEDIN_EMAIL in .env", autoApplied: false };
+    }
     return applyLinkedIn({ jobUrl: applyUrl, credentials, profile, resumePath });
   }
+
+  // Indeed — skip listing pages (they redirect to company ATS anyway)
+  // Extract the actual apply URL from Indeed if possible, else fall through to AI filler
   if (platform === "indeed") {
+    if (!credentials?.linkedinEmail) {
+      // No credentials — try the AI filler on the Indeed apply page directly
+      return openWithSimplify(applyUrl, job, profile);
+    }
     return applyIndeed({ jobUrl: applyUrl, credentials, profile, resumePath });
   }
-  // For all other platforms (Greenhouse, Lever, Ashby, Workday, Glassdoor, etc.)
-  // Fill the form directly with Playwright using the user's profile
+
+  // Glassdoor / ZipRecruiter / direct company ATS pages — use AI form filler
+  if (platform === "glassdoor" || platform === "ziprecruiter") {
+    // These are listing pages, not apply forms — skip to avoid useless tab opens
+    return { success: false, reason: `${platform} listing page — not a direct apply form`, autoApplied: false };
+  }
+
+  // Greenhouse, Lever, Ashby, Workday, company sites — AI fills the form directly
   return openWithSimplify(applyUrl, job, profile);
 }
 
@@ -567,50 +586,116 @@ async function openWithSimplify(url, job, profile) {
     }
   }
 
-  // ── Playwright mode: launch headless Chromium, fill form directly, submit ────
+  // ── Playwright + AI mapper mode ───────────────────────────────────────────
+  let page = null;
   try {
     if (!_simplifyContext) {
-      const browser = await getBrowser(); // reuse shared headless Chromium
+      const browser = await getBrowser();
       _simplifyContext = await browser.newContext({
         viewport: { width: 1440, height: 900 },
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       });
     }
 
-    const page = await _simplifyContext.newPage();
+    page = await _simplifyContext.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await delay(2000, 500);
 
-    // Detect ATS provider from URL
-    const atsHint = url.includes("greenhouse") ? "greenhouse"
-      : url.includes("lever.co")   ? "lever"
-      : url.includes("ashbyhq")    ? "ashby"
-      : url.includes("workday")    ? "workday"
-      : "other";
-
-    if (autoSubmit) {
-      const { submitted } = await navigateAndSubmit(page, profile, (profile || {}).resumePath, atsHint);
-      if (submitted) {
-        await page.close().catch(() => {});
-        return { success: true, reason: `Auto-filled and submitted (${atsHint})`, autoApplied: true };
+    // Click Apply / Apply Now if this is a job description page (not the form yet)
+    const applyBtnSel = [
+      "a:has-text('Apply for this job')", "a:has-text('Apply Now')", "a:has-text('Apply now')",
+      "button:has-text('Apply for this job')", "button:has-text('Apply Now')", "button:has-text('Apply now')",
+      "button:has-text('Start Application')", "button:has-text('Apply Online')",
+    ].join(", ");
+    try {
+      const applyBtn = page.locator(applyBtnSel).first();
+      if (await isVisible(applyBtn)) {
+        const href = await applyBtn.getAttribute("href").catch(() => null);
+        if (href && href.startsWith("http")) {
+          await page.goto(href, { waitUntil: "domcontentloaded", timeout: 20_000 });
+        } else {
+          await applyBtn.click();
+          await page.waitForLoadState("domcontentloaded").catch(() => {});
+        }
+        await delay(2000, 500);
       }
-      // Form filled but submit not found — leave page open for user
-      return { success: false, reason: `Form filled (${atsHint}) — could not find Submit button, left open`, browserOpened: true, autoApplied: false };
+    } catch { /* already on form */ }
+
+    // ── AI-powered multi-step filling loop ────────────────────────────────
+    const SUBMIT_SEL = [
+      "button[type='submit']:visible", "input[type='submit']:visible",
+      "button:has-text('Submit application'):visible", "button:has-text('Submit my application'):visible",
+      "button:has-text('Submit'):visible", "button:has-text('Send application'):visible",
+      "button:has-text('Send my application'):visible",
+    ].join(", ");
+
+    const NEXT_SEL = [
+      "button:has-text('Next'):visible", "button:has-text('Continue'):visible",
+      "button:has-text('Next step'):visible", "button:has-text('Save and continue'):visible",
+      "button[aria-label*='Next']:visible",
+    ].join(", ");
+
+    let filledTotal = 0;
+    const MAX_STEPS = 10;
+
+    for (let step = 0; step < MAX_STEPS; step++) {
+      // Extract fields on this step and ask AI to map them
+      try {
+        const formFields = await extractFormFields(page);
+        if (formFields.length > 0) {
+          const mapping = await aiMapFields(formFields, profile || {}, job || {});
+          if (Object.keys(mapping).length > 0) {
+            const { filled } = await applyFieldMapping(page, mapping, profile || {}, formFields);
+            filledTotal += filled;
+          }
+        }
+      } catch (aiErr) {
+        // AI mapper failed — fall back to keyword filler for this step
+        await fillATSForm(page, profile, (profile || {}).resumePath, "other");
+      }
+
+      await delay(800, 200);
+
+      // Check for Submit button
+      const submitBtn = page.locator(SUBMIT_SEL).first();
+      if (await isVisible(submitBtn)) {
+        if (autoSubmit) {
+          await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+          await submitBtn.click();
+          await delay(2500, 500);
+          await page.close().catch(() => {});
+          return { success: true, reason: `AI-filled and submitted (${filledTotal} fields)`, autoApplied: true };
+        } else {
+          await page.close().catch(() => {});
+          return { success: false, reason: `Form filled (${filledTotal} fields) — autoSubmit is off`, autoApplied: false };
+        }
+      }
+
+      // Click Next/Continue if available
+      const nextBtn = page.locator(NEXT_SEL).first();
+      if (await isVisible(nextBtn)) {
+        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await nextBtn.click();
+        await delay(1800, 400);
+      } else {
+        break; // no Next or Submit found
+      }
     }
 
-    // autoSubmit=false — just fill the form and leave it open
-    await fillATSForm(page, profile, (profile || {}).resumePath, atsHint);
-    return { success: false, reason: `Form pre-filled (${atsHint}) — click Submit to finish`, browserOpened: true, autoApplied: false };
+    // No submit button found — close tab, don't leave it hanging
+    await page.close().catch(() => {});
+    return {
+      success: false,
+      reason: filledTotal > 0
+        ? `Filled ${filledTotal} fields but no Submit button found`
+        : `No form fields found — URL may require login or is a listing page`,
+      autoApplied: false,
+    };
 
   } catch (err) {
+    if (page) await page.close().catch(() => {}); // always close on error
     _simplifyContext = null;
-    // Fallback: open in shell Chrome
-    try {
-      if (process.platform === "win32") await execAsync(`start "" "${url}"`);
-      else await execAsync(`open "${url}"`);
-      return { success: false, reason: `Playwright failed (${err.message}) — opened in Chrome`, browserOpened: true };
-    } catch {
-      return { success: false, reason: `Could not apply: ${err.message}` };
-    }
+    return { success: false, reason: `Apply error: ${err.message}`, autoApplied: false };
   }
 }
 
