@@ -599,7 +599,23 @@ async function openWithSimplify(url, job, profile) {
 
     page = await _simplifyContext.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await delay(2000, 500);
+    await delay(1500, 500);
+
+    // ── Detect login/auth walls early — skip instead of timing out ────────────
+    const isLoginPage = await page.evaluate(() => {
+      const hasUserPass = document.querySelector('input[type="password"]') &&
+        (document.querySelector('#username,input[name="username"],input[name="email"],input[type="email"]'));
+      const hasLoginText = /sign\s*in|log\s*in|create\s*account|register\s*to\s*apply/i.test(
+        document.title + " " + (document.querySelector("h1,h2")?.innerText || "")
+      );
+      const fieldCount = document.querySelectorAll('input:not([type="hidden"]),textarea,select').length;
+      return (hasUserPass || hasLoginText) && fieldCount <= 4;
+    }).catch(() => false);
+
+    if (isLoginPage) {
+      await page.close().catch(() => {});
+      return { success: false, reason: "Login/auth wall detected — skipping", autoApplied: false };
+    }
 
     // Click Apply / Apply Now if this is a job description page (not the form yet)
     const applyBtnSel = [

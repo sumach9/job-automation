@@ -794,7 +794,14 @@ function saveFoundJob(job) {
 }
 
 // ─── Main automation cycle ───────────────────────────────────────────────────
+let cycleRunning = false;   // prevent concurrent cycles
+
 async function runCycle() {
+  if (cycleRunning) {
+    log("info", "Cycle already running — skipping overlap");
+    return;
+  }
+  cycleRunning = true;
   log("info", "Automation cycle started");
   let newThisCycle = 0;
   browserOpensThisCycle = 0;  // reset browser-open counter each cycle
@@ -896,6 +903,8 @@ async function runCycle() {
       </table>`
     ).catch((e) => log("error", "Email send failed", e.message));
   }
+
+  cycleRunning = false;
 }
 
 // ─── Daily Digest Email ──────────────────────────────────────────────────────
