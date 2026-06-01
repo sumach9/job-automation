@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
 import nodemailer from "nodemailer";
 import schedule from "node-schedule";
@@ -25,12 +25,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ─── Auth config ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Auth config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const JWT_SECRET    = process.env.JWT_SECRET    || "jobpilot-jwt-secret-change-in-production";
 const ADMIN_USER    = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASS    = process.env.ADMIN_PASSWORD || "jobpilot2024";
 
-// POST /api/auth/login  — public, no token required
+// POST /api/auth/login  â€” public, no token required
 app.post("/api/auth/login", (req, res) => {
   const { username, password } = req.body || {};
   if (username === ADMIN_USER && password === ADMIN_PASS) {
@@ -40,27 +40,27 @@ app.post("/api/auth/login", (req, res) => {
   return res.status(401).json({ ok: false, message: "Invalid username or password" });
 });
 
-// Auth middleware — protects all /api/* except login + stripe webhook
+// Auth middleware â€” protects all /api/* except login + stripe webhook
 app.use("/api", (req, res, next) => {
   if (req.path === "/auth/login")       return next(); // already handled above
   if (req.path === "/billing/webhook")  return next(); // Stripe signs its own requests
   const header = req.headers.authorization || "";
   const token  = header.startsWith("Bearer ") ? header.slice(7) : null;
-  if (!token) return res.status(401).json({ ok: false, message: "Unauthorized — please log in" });
+  if (!token) return res.status(401).json({ ok: false, message: "Unauthorized â€” please log in" });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
-    return res.status(401).json({ ok: false, message: "Session expired — please log in again" });
+    return res.status(401).json({ ok: false, message: "Session expired â€” please log in again" });
   }
 });
 
-// GET /api/auth/me — verify token and return user info
+// GET /api/auth/me â€” verify token and return user info
 app.get("/api/auth/me", (req, res) => {
   res.json({ ok: true, username: req.user.sub, role: req.user.role });
 });
 
-// ─── Resume upload & parse ────────────────────────────────────────────────────
+// â”€â”€â”€ Resume upload & parse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -73,7 +73,7 @@ const upload = multer({
   },
 });
 
-// POST /api/upload-resume — upload resume + parse it into profile fields
+// POST /api/upload-resume â€” upload resume + parse it into profile fields
 app.post("/api/upload-resume", upload.single("resume"), async (req, res) => {
   if (!req.file) return res.status(400).json({ ok: false, message: "No file uploaded" });
   // Rename to keep original extension
@@ -103,7 +103,7 @@ app.post("/api/upload-resume", upload.single("resume"), async (req, res) => {
     };
     settings.profile = merged;
     saveData({ applications, logs, foundJobs });
-    log("success", `✅ Resume parsed: ${req.file.originalname} — ${parsed.skills?.length || 0} skills, ${parsed.experiences?.length || 0} jobs, ${parsed.education?.length || 0} education`);
+    log("success", `âœ… Resume parsed: ${req.file.originalname} â€” ${parsed.skills?.length || 0} skills, ${parsed.experiences?.length || 0} jobs, ${parsed.education?.length || 0} education`);
     res.json({ ok: true, profile: merged, parsed });
   } catch (err) {
     try { fs.unlinkSync(req.file.path); } catch {}
@@ -112,13 +112,13 @@ app.post("/api/upload-resume", upload.single("resume"), async (req, res) => {
   }
 });
 
-// ─── Serve React build in production ───────────────────────────────────────
+// â”€â”€â”€ Serve React build in production â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const clientBuild = path.join(__dirname, "client", "dist");
 if (fs.existsSync(clientBuild)) {
   app.use(express.static(clientBuild));
 }
 
-// ─── Persistent state file ──────────────────────────────────────────────────
+// â”€â”€â”€ Persistent state file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DATA_FILE = path.join(__dirname, "data.json");
 const SCAN_HISTORY_FILE = path.join(__dirname, "scan-history.tsv");
 
@@ -138,7 +138,7 @@ function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// ─── In-memory state ────────────────────────────────────────────────────────
+// â”€â”€â”€ In-memory state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let isRunning = false;
 let schedulerJob = null;
 let stats = { applied: 0, found: 0, skipped: 0, errors: 0 };
@@ -167,6 +167,7 @@ const settings = {
   intervalMinutes: parseInt(process.env.INTERVAL_MINUTES || "5", 10),
   maxApplicationsPerRun: parseInt(process.env.MAX_APPS_PER_RUN || "10", 10),
   maxBrowserOpensPerCycle: parseInt(process.env.MAX_BROWSER_OPENS || "5", 10),
+  datePostedFilter: process.env.DATE_POSTED_FILTER || "week", // "today" | "week" | "month"
   emailNotifications: process.env.EMAIL_NOTIFICATIONS === "true",
   platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true, tickbig: true },
   tickbigEmail:    process.env.TICKBIG_EMAIL    || "",
@@ -181,7 +182,7 @@ const settings = {
   linkedinPassword: process.env.LINKEDIN_PASSWORD || "",
   simplifyMode: process.env.SIMPLIFY_MODE || "shell",
   simplifyAutoSubmit: process.env.SIMPLIFY_AUTO_SUBMIT === "true",
-  // Applicant profile — loaded from data.json, falls back to env vars
+  // Applicant profile â€” loaded from data.json, falls back to env vars
   profile: (() => {
     const p = _loaded.profile || {};
     return {
@@ -209,23 +210,23 @@ const settings = {
       resumePath:      p.resumePath      || process.env.RESUME_PATH || "",
       resumeFileName:  p.resumeFileName  || "",
       savedAt:         p.savedAt         || null,
-      // ── Work Authorization ──────────────────────────────────────────────
+      // â”€â”€ Work Authorization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       isOver18:              p.isOver18              ?? true,
       workAuthorized:        p.workAuthorized        ?? true,
       requiresSponsorship:   p.requiresSponsorship   ?? false,
-      // ── Location & Office Preferences ──────────────────────────────────
+      // â”€â”€ Location & Office Preferences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       willingToRelocate:     p.willingToRelocate     ?? true,
       preferredOfficeHub:    p.preferredOfficeHub    || "Seattle, Washington",
       inPersonOk:            p.inPersonOk            ?? true,
-      // ── EEO / Self-Identification (all default to Decline) ──────────────
+      // â”€â”€ EEO / Self-Identification (all default to Decline) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       gender:                p.gender                || "Decline to self-identify",
       race:                  p.race                  || "Decline to self-identify",
       veteranStatus:         p.veteranStatus         || "I am not a protected veteran",
       disability:            p.disability            || "I don't wish to answer",
-      // ── Skills / Experience detail questions ────────────────────────────
+      // â”€â”€ Skills / Experience detail questions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       pythonYears:           p.pythonYears           || "5 - 7 years",
       codingPercentage:      p.codingPercentage      || "75%",
-      // ── Open-text application answers ──────────────────────────────────
+      // â”€â”€ Open-text application answers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       whyJoinAnswer:         p.whyJoinAnswer         || "",  // "Why are you interested in joining X?"
       culturalValuesAnswer:  p.culturalValuesAnswer  || "",  // cultural fit / values example
       additionalInfo:        p.additionalInfo        || "",
@@ -233,7 +234,7 @@ const settings = {
   })(),
 };
 
-// ─── Scan history (TSV audit trail like career-ops) ─────────────────────────
+// â”€â”€â”€ Scan history (TSV audit trail like career-ops) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function logScanHistory(job, status) {
   const row = [
     new Date().toISOString(),
@@ -248,7 +249,7 @@ function logScanHistory(job, status) {
   fs.appendFileSync(SCAN_HISTORY_FILE, row + "\n");
 }
 
-// ─── Logging helper ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Logging helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function log(level, message, detail = "") {
   const entry = {
     id: Date.now() + Math.random(),
@@ -260,10 +261,22 @@ function log(level, message, detail = "") {
   logs.unshift(entry);
   if (logs.length > 500) logs.splice(500);
   saveData({ applications, logs, foundJobs });
-  console.log(`[${level.toUpperCase()}] ${message}${detail ? " — " + detail : ""}`);
+  console.log(`[${level.toUpperCase()}] ${message}${detail ? " â€” " + detail : ""}`);
 }
 
-// ─── Email helper ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Date-posted chip helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Returns the SerpAPI "chips" value and a cutoff Date for local filtering
+function getDateFilter() {
+  const f = settings.datePostedFilter || "week";
+  const chipMap   = { today: "date_posted:today", week: "date_posted:week", month: "date_posted:month" };
+  const cutoffMap = { today: 1, week: 7, month: 30 };
+  const chip      = chipMap[f]   || chipMap.week;
+  const days      = cutoffMap[f] || 7;
+  const cutoff    = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return { chip, cutoff, days };
+}
+
+// â”€â”€â”€ Email helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function sendEmail(subject, html, toOverride = null) {
   if (!settings.emailUser || !settings.emailPass) return;
   const transporter = nodemailer.createTransport({
@@ -278,19 +291,19 @@ async function sendEmail(subject, html, toOverride = null) {
   });
 }
 
-// ─── Apify helpers ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Apify helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function runApifyActor(actorId, input) {
   const url = `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items?token=${settings.apifyToken}`;
   const { data } = await axios.post(url, input, { timeout: 120_000 });
   return Array.isArray(data) ? data : [];
 }
 
-// ─── Platform scrapers ────────────────────────────────────────────────────────
+// â”€â”€â”€ Platform scrapers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// ── LinkedIn via SerpAPI Google Jobs (platform filter) ────────────────────────
+// â”€â”€ LinkedIn via SerpAPI Google Jobs (platform filter) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function scrapeLinkedIn(title, location) {
   if (!settings.serpApiKey) {
-    log("warning", "No SerpAPI key — skipping LinkedIn search");
+    log("warning", "No SerpAPI key â€” skipping LinkedIn search");
     return [];
   }
   try {
@@ -299,7 +312,7 @@ async function scrapeLinkedIn(title, location) {
         engine:   "google_jobs",
         q:        `${title} site:linkedin.com/jobs`,
         location,
-        chips:    "date_posted:week",
+        chips:    getDateFilter().chip,
         hl:       "en",
         api_key:  settings.serpApiKey,
       },
@@ -332,10 +345,10 @@ async function scrapeLinkedIn(title, location) {
   }
 }
 
-// ── Indeed via SerpAPI ────────────────────────────────────────────────────────
+// â”€â”€ Indeed via SerpAPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function scrapeIndeed(title, location) {
   if (!settings.serpApiKey) {
-    log("warning", "No SerpAPI key — skipping Indeed search");
+    log("warning", "No SerpAPI key â€” skipping Indeed search");
     return [];
   }
   try {
@@ -344,7 +357,7 @@ async function scrapeIndeed(title, location) {
         engine:   "google_jobs",
         q:        `${title} site:indeed.com`,
         location,
-        chips:    "date_posted:week",
+        chips:    getDateFilter().chip,
         hl:       "en",
         api_key:  settings.serpApiKey,
       },
@@ -377,7 +390,7 @@ async function scrapeIndeed(title, location) {
   }
 }
 
-// ── Glassdoor via SerpAPI ─────────────────────────────────────────────────────
+// â”€â”€ Glassdoor via SerpAPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function scrapeGlassdoor(title, location) {
   if (!settings.serpApiKey) return [];
   try {
@@ -386,7 +399,7 @@ async function scrapeGlassdoor(title, location) {
         engine:  "google_jobs",
         q:       `${title} site:glassdoor.com`,
         location,
-        chips:   "date_posted:week",
+        chips:    getDateFilter().chip,
         hl:      "en",
         api_key: settings.serpApiKey,
       },
@@ -417,7 +430,7 @@ async function scrapeGlassdoor(title, location) {
   }
 }
 
-// ── ZipRecruiter via SerpAPI ──────────────────────────────────────────────────
+// â”€â”€ ZipRecruiter via SerpAPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function scrapeZipRecruiter(title, location) {
   if (!settings.serpApiKey) return [];
   try {
@@ -426,7 +439,7 @@ async function scrapeZipRecruiter(title, location) {
         engine:  "google_jobs",
         q:       `${title} site:ziprecruiter.com`,
         location,
-        chips:   "date_posted:week",
+        chips:    getDateFilter().chip,
         hl:      "en",
         api_key: settings.serpApiKey,
       },
@@ -458,10 +471,10 @@ async function scrapeZipRecruiter(title, location) {
   }
 }
 
-// ─── Google Jobs via SerpAPI ──────────────────────────────────────────────────
+// â”€â”€â”€ Google Jobs via SerpAPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function scrapeGoogleJobs(title, location) {
   if (!settings.serpApiKey) {
-    log("warning", "No SerpAPI key — skipping Google Jobs");
+    log("warning", "No SerpAPI key â€” skipping Google Jobs");
     return [];
   }
   try {
@@ -470,7 +483,7 @@ async function scrapeGoogleJobs(title, location) {
         engine: "google_jobs",
         q: `${title} ${location}`,
         location,
-        chips: "date_posted:today",   // today's postings only
+        chips:    getDateFilter().chip,
         hl: "en",
         api_key: settings.serpApiKey,
       },
@@ -480,7 +493,7 @@ async function scrapeGoogleJobs(title, location) {
     const jobs = data.jobs_results || [];
     return jobs.map((r) => {
       // apply_options = actual job-board apply links (LinkedIn, Indeed, company portal)
-      // related_links = company website / Google links — do NOT use for applying
+      // related_links = company website / Google links â€” do NOT use for applying
       const applyOptions = (r.apply_options || []).filter(
         (l) => l.link && !l.link.includes("google.com")
       );
@@ -512,13 +525,13 @@ async function scrapeGoogleJobs(title, location) {
       };
     });
   } catch (err) {
-    log("error", `Google Jobs scrape failed — ${title}`, err.message);
+    log("error", `Google Jobs scrape failed â€” ${title}`, err.message);
     stats.errors++;
     return [];
   }
 }
 
-// ─── TickBig via REST API ─────────────────────────────────────────────────────
+// â”€â”€â”€ TickBig via REST API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function scrapeTickBigJobs(title, location) {
   if (!settings.tickbigEmail || !settings.tickbigPassword) return [];
   try {
@@ -539,7 +552,7 @@ async function scrapeTickBigJobs(title, location) {
 }
 
 function parsePostedAt(text) {
-  // "3 hours ago" → ms
+  // "3 hours ago" â†’ ms
   if (!text) return 0;
   const [n, unit] = text.toLowerCase().split(" ");
   const num = parseInt(n, 10) || 0;
@@ -549,7 +562,7 @@ function parsePostedAt(text) {
   return 0;
 }
 
-// ─── Relevance filter ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Relevance filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const RELEVANT_KEYWORDS = [
   "data scientist", "data engineer", "data analyst", "data entry",
   "ai engineer", "artificial intelligence", "machine learning", "ml engineer",
@@ -573,7 +586,7 @@ function isRelevant(job) {
   return hasRelevant && !hasIrrelevant;
 }
 
-// ─── Multi-platform scrape ────────────────────────────────────────────────────
+// â”€â”€â”€ Multi-platform scrape â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Track already-seen URLs globally across all runs (for TSV dedup)
 const seenUrls = new Set(foundJobs.map((j) => j.url).filter(Boolean));
 
@@ -587,8 +600,8 @@ async function scrapeAllPlatforms(title, location) {
     if (settings.platforms.ziprecruiter !== false) promises.push(scrapeZipRecruiter(title, location));
     if (settings.platforms.googlejobs   !== false) promises.push(scrapeGoogleJobs(title, location));
   } else if (settings.platforms.googlejobs !== false) {
-    // No SerpAPI key at all — skip
-    log("warning", "No SerpAPI key configured — job search disabled. Add SERPAPI_KEY to .env");
+    // No SerpAPI key at all â€” skip
+    log("warning", "No SerpAPI key configured â€” job search disabled. Add SERPAPI_KEY to .env");
   }
 
   // TickBig runs independently of SerpAPI (uses its own REST API)
@@ -616,7 +629,7 @@ async function scrapeAllPlatforms(title, location) {
   return relevant;
 }
 
-// ATS Direct scraping runs once per cycle (not per title/location — it already filters internally)
+// ATS Direct scraping runs once per cycle (not per title/location â€” it already filters internally)
 let _atsScrapePromise = null;
 async function scrapeATSOnce() {
   if (_atsScrapePromise) return _atsScrapePromise;
@@ -639,8 +652,8 @@ function getMockJobs(title, location) {
   }));
 }
 
-// ─── Application logic ───────────────────────────────────────────────────────
-let browserOpensThisCycle = 0;   // reset each cycle — caps how many tabs open at once
+// â”€â”€â”€ Application logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let browserOpensThisCycle = 0;   // reset each cycle â€” caps how many tabs open at once
 
 async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
   const alreadyApplied = applications.some((a) => a.jobId === job.id);
@@ -656,9 +669,9 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
   const hasLinkedInCreds = !!(settings.linkedinEmail && settings.linkedinPassword);
   const isLinkedInOrIndeed = platform === "linkedin" || platform === "indeed";
 
-  // Cap browser opens per cycle (LinkedIn/Indeed Playwright doesn't count — it reuses one window)
+  // Cap browser opens per cycle (LinkedIn/Indeed Playwright doesn't count â€” it reuses one window)
   if (!isLinkedInOrIndeed && browserOpensThisCycle >= maxBrowserOpens) {
-    // Hit the cap — queue for manual review instead
+    // Hit the cap â€” queue for manual review instead
     const record = buildRecord(job, "queued-manual", null);
     applications.unshift(record);
     if (applications.length > 1000) applications.splice(1000);
@@ -669,7 +682,7 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
 
   if (settings.autoApplyEnabled && applyUrl) {
     try {
-      // LinkedIn / Indeed — need credentials to log in first
+      // LinkedIn / Indeed â€” need credentials to log in first
       if (isLinkedInOrIndeed && !hasLinkedInCreds) {
         status = "queued-manual";
         log("warning", `Skipped (no LinkedIn creds): ${job.title} @ ${job.company}`);
@@ -688,10 +701,10 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
 
         if (autoApplyResult.success) {
           status = "auto-applied";
-          log("success", `✅ Auto-applied: ${job.title} @ ${job.company} [${job.platform}]`, autoApplyResult.reason);
+          log("success", `âœ… Auto-applied: ${job.title} @ ${job.company} [${job.platform}]`, autoApplyResult.reason);
         } else if (autoApplyResult.autoApplied) {
           status = "auto-applied";
-          log("success", `✅ Submitted: ${job.title} @ ${job.company}`, autoApplyResult.reason);
+          log("success", `âœ… Submitted: ${job.title} @ ${job.company}`, autoApplyResult.reason);
         } else if (autoApplyResult.simplifyUsed && autoApplyResult.browserOpened) {
           status = "simplify-opened";
           browserOpensThisCycle++;
@@ -699,10 +712,10 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
         } else if (autoApplyResult.browserOpened) {
           status = "browser-opened";
           browserOpensThisCycle++;
-          log("info", `Form filled, needs manual submit: ${job.title} @ ${job.company} — ${autoApplyResult.reason}`);
+          log("info", `Form filled, needs manual submit: ${job.title} @ ${job.company} â€” ${autoApplyResult.reason}`);
         } else {
           status = "apply-failed";
-          log("warning", `Apply failed: ${job.title} @ ${job.company} — ${autoApplyResult.reason}`);
+          log("warning", `Apply failed: ${job.title} @ ${job.company} â€” ${autoApplyResult.reason}`);
         }
       }
     } catch (err) {
@@ -745,7 +758,7 @@ function buildRecord(job, status, autoApplyResult) {
   };
 }
 
-// ─── Save all found jobs (for manual review in dashboard) ────────────────────
+// â”€â”€â”€ Save all found jobs (for manual review in dashboard) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function saveFoundJob(job) {
   const exists = foundJobs.some((j) => j.id === job.id);
   if (exists) {
@@ -793,12 +806,12 @@ function saveFoundJob(job) {
   return true;
 }
 
-// ─── Main automation cycle ───────────────────────────────────────────────────
+// â”€â”€â”€ Main automation cycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let cycleRunning = false;   // prevent concurrent cycles
 
 async function runCycle() {
   if (cycleRunning) {
-    log("info", "Cycle already running — skipping overlap");
+    log("info", "Cycle already running â€” skipping overlap");
     return;
   }
   cycleRunning = true;
@@ -807,7 +820,7 @@ async function runCycle() {
   browserOpensThisCycle = 0;  // reset browser-open counter each cycle
   const maxBrowserOpens = settings.maxBrowserOpensPerCycle ?? 5;
 
-  // ── 1. Apify + SerpAPI scrapers (per title/location) ──
+  // â”€â”€ 1. Apify + SerpAPI scrapers (per title/location) â”€â”€
   for (const title of settings.jobTitles) {
     for (const location of settings.locations) {
       log("info", `Searching: "${title}" in ${location}`);
@@ -827,15 +840,16 @@ async function runCycle() {
     }
   }
 
-  // ── 2. LinkedIn Easy Apply Direct ──────────────────────────────────────────
+  // â”€â”€ 2. LinkedIn Easy Apply Direct â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (settings.linkedinEmail && settings.linkedinPassword && settings.platforms?.linkedin !== false) {
-    log("info", "LinkedIn Direct: scanning for Easy Apply jobs…");
+    log("info", "LinkedIn Direct: scanning for Easy Apply jobsâ€¦");
     try {
       const liJobs = await scrapeLinkedInEasyApply(
         { linkedinEmail: settings.linkedinEmail, linkedinPassword: settings.linkedinPassword },
         settings.jobTitles,
         settings.locations,
-        30
+        30,
+        settings.datePostedFilter || "week"
       );
       const newLi = liJobs.filter(j => !seenUrls.has(j.url));
       log("info", `LinkedIn Direct: found ${newLi.length} Easy Apply jobs`);
@@ -852,9 +866,9 @@ async function runCycle() {
     }
   }
 
-  // ── 3. ATS Direct scraping (Greenhouse / Lever / Ashby) ──
+  // â”€â”€ 3. ATS Direct scraping (Greenhouse / Lever / Ashby) â”€â”€
   if (settings.platforms.atsDirect !== false) {
-    log("info", `ATS Direct: scanning ${ATS_COMPANY_COUNT} companies (Greenhouse, Lever, Ashby)…`);
+    log("info", `ATS Direct: scanning ${ATS_COMPANY_COUNT} companies (Greenhouse, Lever, Ashby)â€¦`);
     try {
       const atsJobs = await scrapeATSOnce();
       log("info", `ATS Direct: found ${atsJobs.length} relevant jobs`);
@@ -877,17 +891,17 @@ async function runCycle() {
   // Persist found jobs after each cycle
   saveData({ applications, logs, foundJobs });
 
-  // Sync to Google Sheets if configured (fire-and-forget — don't block cycle)
+  // Sync to Google Sheets if configured (fire-and-forget â€” don't block cycle)
   if (isSheetsConfigured()) {
     syncToGoogleSheets(foundJobs, applications)
       .then(r => {
-        if (r.ok) log("success", `Google Sheets synced — ${r.jobsWritten} jobs, ${r.appsWritten} applications`);
+        if (r.ok) log("success", `Google Sheets synced â€” ${r.jobsWritten} jobs, ${r.appsWritten} applications`);
         else log("warning", `Google Sheets sync failed: ${r.error}`);
       })
       .catch(e => log("warning", `Google Sheets sync error: ${e.message}`));
   }
 
-  log("info", `Cycle complete — ${newThisCycle} new applications queued`);
+  log("info", `Cycle complete â€” ${newThisCycle} new applications queued`);
 
   if (newThisCycle > 0 && settings.emailNotifications) {
     const rows = applications
@@ -907,7 +921,7 @@ async function runCycle() {
   cycleRunning = false;
 }
 
-// ─── Daily Digest Email ──────────────────────────────────────────────────────
+// â”€â”€â”€ Daily Digest Email â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function sendDailyDigest() {
   const notifyTo = settings.notifyEmail || settings.emailUser;
 
@@ -915,7 +929,7 @@ async function sendDailyDigest() {
   const allJobs = [...foundJobs].sort((a, b) => (b.score || 0) - (a.score || 0));
 
   if (allJobs.length === 0) {
-    log("info", "Daily digest: no jobs found yet — start the scanner first");
+    log("info", "Daily digest: no jobs found yet â€” start the scanner first");
     return;
   }
 
@@ -930,18 +944,18 @@ async function sendDailyDigest() {
       <td style="padding:11px 14px;font-size:12px;color:#a8a29e;font-weight:600;width:32px;">${i + 1}</td>
       <td style="padding:11px 14px;">
         <div style="font-weight:600;color:#1c1917;font-size:13px;line-height:1.3;">${j.title}</div>
-        <div style="color:#78716c;font-size:12px;margin-top:2px;">${j.company}${j.location ? " · " + j.location : ""}</div>
+        <div style="color:#78716c;font-size:12px;margin-top:2px;">${j.company}${j.location ? " Â· " + j.location : ""}</div>
         ${j.salary ? `<div style="color:#16a34a;font-size:11px;margin-top:2px;">${j.salary}</div>` : ""}
       </td>
       <td style="padding:11px 14px;white-space:nowrap;vertical-align:top;">
-        <span style="background:${sc(j.score)}18;color:${sc(j.score)};border:1px solid ${sc(j.score)}30;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;">${j.score ?? "—"}</span>
+        <span style="background:${sc(j.score)}18;color:${sc(j.score)};border:1px solid ${sc(j.score)}30;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;">${j.score ?? "â€”"}</span>
       </td>
       <td style="padding:11px 14px;vertical-align:top;">
-        <span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:2px 7px;font-size:11px;">${j.platform || "—"}</span>
+        <span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:2px 7px;font-size:11px;">${j.platform || "â€”"}</span>
         ${j.easyApply ? '<br><span style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:600;margin-top:3px;display:inline-block;">Easy Apply</span>' : ""}
       </td>
       <td style="padding:11px 14px;vertical-align:top;white-space:nowrap;">
-        <a href="${j.url}" style="background:#1c1917;color:#fff;border-radius:6px;padding:6px 13px;font-size:12px;font-weight:600;text-decoration:none;">Apply →</a>
+        <a href="${j.url}" style="background:#1c1917;color:#fff;border-radius:6px;padding:6px 13px;font-size:12px;font-weight:600;text-decoration:none;">Apply â†’</a>
       </td>
     </tr>`).join("");
 
@@ -953,8 +967,8 @@ async function sendDailyDigest() {
     <!-- Header -->
     <div style="background:#1c1917;padding:26px 28px;">
       <div style="display:inline-flex;align-items:center;gap:10px;">
-        <span style="background:#fff;border-radius:8px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:16px;">⚡</span>
-        <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:-0.5px;">JobPilot — All Job Results</span>
+        <span style="background:#fff;border-radius:8px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:16px;">âš¡</span>
+        <span style="color:#fff;font-size:18px;font-weight:700;letter-spacing:-0.5px;">JobPilot â€” All Job Results</span>
       </div>
       <div style="color:#a8a29e;font-size:12px;margin-top:6px;">${new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
     </div>
@@ -978,7 +992,7 @@ async function sendDailyDigest() {
     <!-- Sub header -->
     <div style="padding:16px 20px;border-bottom:1px solid #f0eeec;background:#fff;">
       <span style="font-size:13px;font-weight:700;color:#1c1917;">${allJobs.length} Jobs Found</span>
-      <span style="font-size:12px;color:#a8a29e;margin-left:8px;">Sorted by fit score · Click Apply → to open each job</span>
+      <span style="font-size:12px;color:#a8a29e;margin-left:8px;">Sorted by fit score Â· Click Apply â†’ to open each job</span>
     </div>
 
     <!-- Jobs table -->
@@ -1005,15 +1019,15 @@ async function sendDailyDigest() {
 </html>`;
 
   await sendEmail(
-    `JobPilot: ${allJobs.length} jobs found — ${new Date().toLocaleDateString("en-US",{month:"short",day:"numeric"})}`,
+    `JobPilot: ${allJobs.length} jobs found â€” ${new Date().toLocaleDateString("en-US",{month:"short",day:"numeric"})}`,
     html,
     notifyTo
   )
-    .then(() => log("success", `✅ Digest sent to ${notifyTo} — ${allJobs.length} jobs`))
+    .then(() => log("success", `âœ… Digest sent to ${notifyTo} â€” ${allJobs.length} jobs`))
     .catch(err => log("error", "Digest send failed", err.message));
 }
 
-// ─── Scheduler ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let digestJob = null;
 
 function startScheduler() {
@@ -1034,7 +1048,7 @@ function stopScheduler() {
   // Keep digestJob running even when scanner is stopped
 }
 
-// ─── API routes ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ API routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get("/api/status", (req, res) => {
   const hotMatches = foundJobs.filter(j => j.score >= 3.5).length;
@@ -1064,7 +1078,7 @@ app.get("/api/applications", (req, res) => {
   res.json({ total: applications.length, page, limit, items: applications.slice(start, start + limit) });
 });
 
-// GET /api/jobs — all scraped jobs for manual review
+// GET /api/jobs â€” all scraped jobs for manual review
 app.get("/api/jobs", (req, res) => {
   const limit  = parseInt(req.query.limit  || "200", 10);
   const offset = parseInt(req.query.offset || "0",   10);
@@ -1085,11 +1099,11 @@ app.get("/api/logs", (req, res) => {
 app.get("/api/stats", (req, res) => res.json(stats));
 
 app.post("/api/settings", (req, res) => {
-  const allowed = ["jobTitles", "locations", "intervalMinutes", "maxApplicationsPerRun", "maxBrowserOpensPerCycle", "emailNotifications", "notifyEmail", "platforms", "autoApplyEnabled"];
+  const allowed = ["jobTitles", "locations", "intervalMinutes", "maxApplicationsPerRun", "maxBrowserOpensPerCycle", "emailNotifications", "notifyEmail", "platforms", "autoApplyEnabled", "datePostedFilter"];
   for (const key of allowed) {
     if (req.body[key] !== undefined) settings[key] = req.body[key];
   }
-  // Credential fields — only update if provided
+  // Credential fields â€” only update if provided
   const credFields = ["serpApiKey", "apifyToken", "emailPass", "linkedinEmail", "linkedinPassword", "tickbigEmail", "tickbigPassword"];
   let tickbigChanged = false;
   for (const key of credFields) {
@@ -1106,12 +1120,12 @@ app.post("/api/settings", (req, res) => {
   res.json({ ok: true, settings: sanitizeSettings(settings) });
 });
 
-// GET /api/profile — return the current user profile
+// GET /api/profile â€” return the current user profile
 app.get("/api/profile", (req, res) => {
   res.json({ ok: true, profile: settings.profile });
 });
 
-// POST /api/profile — save profile from extension popup (any user)
+// POST /api/profile â€” save profile from extension popup (any user)
 app.post("/api/profile", (req, res) => {
   const p = req.body || {};
   // Merge all profile fields
@@ -1140,11 +1154,11 @@ app.post("/api/profile", (req, res) => {
     if (roles.length > 0) settings.jobTitles = roles;
   }
   saveData({ applications, logs, foundJobs, profile: settings.profile });
-  log("info", `Profile saved — ${settings.profile.name || "unnamed user"}`);
+  log("info", `Profile saved â€” ${settings.profile.name || "unnamed user"}`);
   res.json({ ok: true, profile: settings.profile });
 });
 
-// POST /api/generate-resume — tailored resume sections for a job
+// POST /api/generate-resume â€” tailored resume sections for a job
 app.post("/api/generate-resume", (req, res) => {
   try {
     const { job = {}, profile = {} } = req.body;
@@ -1178,7 +1192,7 @@ function generateTailoredResume(job, profile) {
     ? profile.skills
     : (profile.skills || "").split(",").map(s => s.trim()).filter(Boolean);
 
-  // Skills that appear in the job description — put first
+  // Skills that appear in the job description â€” put first
   const matchedSkills = skillArr.filter(s => description.includes(s.toLowerCase()));
   const otherSkills   = skillArr.filter(s => !description.includes(s.toLowerCase()));
   const orderedSkills = [...matchedSkills, ...otherSkills];
@@ -1206,7 +1220,7 @@ function generateTailoredResume(job, profile) {
     `Led cross-functional collaboration to deliver data-driven insights that reduced decision time by 25%`,
     matchedSkills[0] ? `Optimised ${matchedSkills[0]} workflows, cutting processing time by 40% at scale` : null,
     `Mentored team members and contributed to technical documentation and best practices`,
-    `Delivered ${yrsExp > 0 ? yrsExp : "multiple"} major projects end-to-end — from requirements through production deployment`,
+    `Delivered ${yrsExp > 0 ? yrsExp : "multiple"} major projects end-to-end â€” from requirements through production deployment`,
   ].filter(Boolean);
 
   return {
@@ -1215,7 +1229,7 @@ function generateTailoredResume(job, profile) {
     tailoredSummary,
     matchedSkills,
     otherSkills,
-    missingSkills,           // skills in JD not in profile — "skill gap"
+    missingSkills,           // skills in JD not in profile â€” "skill gap"
     orderedSkills,
     experienceBullets: bulletTemplates,
     seniority: seniorityLabel,
@@ -1225,7 +1239,7 @@ function generateTailoredResume(job, profile) {
   };
 }
 
-// POST /api/skill-gap — quick skill gap analysis for a job
+// POST /api/skill-gap â€” quick skill gap analysis for a job
 app.post("/api/skill-gap", (req, res) => {
   try {
     const { job = {}, profile = {} } = req.body;
@@ -1265,7 +1279,7 @@ app.post("/api/skill-gap", (req, res) => {
   }
 });
 
-// POST /api/digest — send daily digest immediately (manual trigger)
+// POST /api/digest â€” send daily digest immediately (manual trigger)
 app.post("/api/digest", async (req, res) => {
   try {
     await sendDailyDigest();
@@ -1275,7 +1289,7 @@ app.post("/api/digest", async (req, res) => {
   }
 });
 
-// POST /api/sync-sheets — push jobs + applications to Google Sheets now
+// POST /api/sync-sheets â€” push jobs + applications to Google Sheets now
 app.post("/api/sync-sheets", async (req, res) => {
   if (!isSheetsConfigured()) {
     return res.status(400).json({
@@ -1286,7 +1300,7 @@ app.post("/api/sync-sheets", async (req, res) => {
   try {
     const result = await syncToGoogleSheets(foundJobs, applications);
     if (result.ok) {
-      log("success", `Google Sheets manual sync — ${result.jobsWritten} jobs, ${result.appsWritten} apps`);
+      log("success", `Google Sheets manual sync â€” ${result.jobsWritten} jobs, ${result.appsWritten} apps`);
       res.json({ ok: true, ...result });
     } else {
       res.status(500).json({ ok: false, message: result.error });
@@ -1296,7 +1310,7 @@ app.post("/api/sync-sheets", async (req, res) => {
   }
 });
 
-// GET /api/sheets-status — check if Google Sheets is configured
+// GET /api/sheets-status â€” check if Google Sheets is configured
 app.get("/api/sheets-status", (req, res) => {
   res.json({
     configured: isSheetsConfigured(),
@@ -1306,14 +1320,14 @@ app.get("/api/sheets-status", (req, res) => {
 
 app.post("/api/test-email", async (req, res) => {
   try {
-    await sendEmail("Job Bot — test email", "<h2>Email notifications are working!</h2>");
+    await sendEmail("Job Bot â€” test email", "<h2>Email notifications are working!</h2>");
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
   }
 });
 
-// POST /api/apply/:id  — manually trigger auto-apply for a queued job
+// POST /api/apply/:id  â€” manually trigger auto-apply for a queued job
 app.post("/api/apply/:id", async (req, res) => {
   const id = parseFloat(req.params.id);
   const record = applications.find((a) => a.id === id);
@@ -1322,7 +1336,7 @@ app.post("/api/apply/:id", async (req, res) => {
     return res.status(400).json({ ok: false, message: "LinkedIn credentials not configured in .env" });
   }
 
-  res.json({ ok: true, message: "Auto-apply started — watch the browser window" });
+  res.json({ ok: true, message: "Auto-apply started â€” watch the browser window" });
 
   // Run in background so we don't block the response
   smartApply({
@@ -1349,14 +1363,14 @@ app.post("/api/apply/:id", async (req, res) => {
   });
 });
 
-// POST /api/reset-session  — reset LinkedIn browser session
+// POST /api/reset-session  â€” reset LinkedIn browser session
 app.post("/api/reset-session", async (req, res) => {
   await resetSession();
   log("info", "LinkedIn browser session reset");
   res.json({ ok: true });
 });
 
-// GET /api/ats-companies — list all companies being scraped directly
+// GET /api/ats-companies â€” list all companies being scraped directly
 app.get("/api/ats-companies", (req, res) => {
   res.json({
     total: ATS_COMPANY_COUNT,
@@ -1366,7 +1380,7 @@ app.get("/api/ats-companies", (req, res) => {
   });
 });
 
-// GET /api/scan-history — last N rows from TSV
+// GET /api/scan-history â€” last N rows from TSV
 app.get("/api/scan-history", (req, res) => {
   try {
     const limit = parseInt(req.query.limit || "200", 10);
@@ -1386,18 +1400,18 @@ app.get("/api/scan-history", (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // OneTouch Extension Endpoints
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// POST /api/onetouch-apply — Chrome extension calls this when user clicks ⚡
+// POST /api/onetouch-apply â€” Chrome extension calls this when user clicks âš¡
 // Saves the job as "onetouch-filled" and tracks it in the dashboard
 app.post("/api/onetouch-apply", (req, res) => {
   try {
     const job = req.body;
     if (!job?.url) return res.json({ ok: false, reason: "No URL provided" });
 
-    // Dedup — if URL already tracked, return the existing record id so the
+    // Dedup â€” if URL already tracked, return the existing record id so the
     // extension can still hook its submit button to mark it "applied"
     const existing = applications.find(a => a.url === job.url);
     if (existing) return res.json({ ok: true, deduped: true, id: existing.id });
@@ -1445,7 +1459,7 @@ app.post("/api/onetouch-apply", (req, res) => {
   }
 });
 
-// POST /api/score-job — extension calls this to show match score on job page
+// POST /api/score-job â€” extension calls this to show match score on job page
 app.post("/api/score-job", (req, res) => {
   try {
     const job = req.body;
@@ -1456,8 +1470,8 @@ app.post("/api/score-job", (req, res) => {
   }
 });
 
-// GET /api/viral-image — generate & stream a 1200×630 PNG from live job data
-// No external API calls — pure SVG+Sharp pipeline
+// GET /api/viral-image â€” generate & stream a 1200Ã—630 PNG from live job data
+// No external API calls â€” pure SVG+Sharp pipeline
 app.get("/api/viral-image", async (req, res) => {
   try {
     const { png, stats } = await generateViralImage(null, settings.profile);
@@ -1480,13 +1494,13 @@ app.delete("/api/applications/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // CareerOps-inspired: Tailored answer generation
 // POST /api/generate-answers
 // { job: { title, company, description }, profile: { name, skills, summary, ... } }
 // Returns: { coverLetter, whyRole, talkingPoints, matchedSkills }
-// No external API needed — pure template engine
-// ─────────────────────────────────────────────────────────────────────────────
+// No external API needed â€” pure template engine
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.post("/api/generate-answers", (req, res) => {
   try {
     const { job = {}, profile = {} } = req.body;
@@ -1570,14 +1584,14 @@ ${name || firstName}`;
   // Talking points for interview prep
   const talkingPoints = [
     matchedSkills.length > 0
-      ? `✅ Highlight your experience with: ${matchedSkills.join(", ")}`
-      : `📌 Emphasise your ${yearsExperience} years of relevant experience`,
+      ? `âœ… Highlight your experience with: ${matchedSkills.join(", ")}`
+      : `ðŸ“Œ Emphasise your ${yearsExperience} years of relevant experience`,
     reqSentences.length > 0
-      ? `📋 Address this requirement: "${reqSentences[0].slice(0, 80)}…"`
-      : `📋 Research ${company}'s recent products and engineering blog`,
-    `🎯 Prepare 2–3 STAR stories (Situation, Task, Action, Result)`,
-    `🔍 Review ${company}'s mission, values, and recent news before the interview`,
-    remotePreference ? `🏠 You prefer: ${remotePreference} — confirm arrangement early` : null,
+      ? `ðŸ“‹ Address this requirement: "${reqSentences[0].slice(0, 80)}â€¦"`
+      : `ðŸ“‹ Research ${company}'s recent products and engineering blog`,
+    `ðŸŽ¯ Prepare 2â€“3 STAR stories (Situation, Task, Action, Result)`,
+    `ðŸ” Review ${company}'s mission, values, and recent news before the interview`,
+    remotePreference ? `ðŸ  You prefer: ${remotePreference} â€” confirm arrangement early` : null,
   ].filter(Boolean);
 
   return {
@@ -1590,7 +1604,7 @@ ${name || firstName}`;
   };
 }
 
-// ─── Pipeline stage management ───────────────────────────────────────────────
+// â”€â”€â”€ Pipeline stage management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // PATCH /api/applications/:id/stage  { stage: "interviewing" | "offered" | "rejected" | "applied" }
 const VALID_STAGES = ["applied", "interviewing", "offered", "rejected", "onetouch-filled", "queued-manual"];
 
@@ -1604,11 +1618,11 @@ app.patch("/api/applications/:id/stage", (req, res) => {
   record.stageUpdated = new Date().toISOString();
   if (stage === "applied") record.appliedAt = record.appliedAt || new Date().toISOString();
   saveData({ applications, logs, foundJobs });
-  log("success", `Pipeline: ${record.title} @ ${record.company} → ${stage}`);
+  log("success", `Pipeline: ${record.title} @ ${record.company} â†’ ${stage}`);
   res.json({ ok: true, record });
 });
 
-// GET /api/pipeline — returns applications grouped by stage
+// GET /api/pipeline â€” returns applications grouped by stage
 app.get("/api/pipeline", (req, res) => {
   const stages = {
     "queued-manual":   [],
@@ -1626,26 +1640,26 @@ app.get("/api/pipeline", (req, res) => {
   res.json({ stages });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// AGENTS SYSTEM — 5 autonomous agents, no LLM API required
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// AGENTS SYSTEM â€” 5 autonomous agents, no LLM API required
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const agentRuns = {};
 
 const AGENT_DEFINITIONS = [
-  { id:"outreach-writer",   name:"Outreach Writer",    icon:"✉️",  color:"#6366f1",
+  { id:"outreach-writer",   name:"Outreach Writer",    icon:"âœ‰ï¸",  color:"#6366f1",
     description:"Generates personalised LinkedIn connection requests for your top hot-match jobs.",
     configFields:[{ key:"topN", label:"Top N jobs", type:"number", default:5 },
                   { key:"tone", label:"Tone", type:"select", options:["Professional","Friendly","Concise"], default:"Professional" }] },
-  { id:"followup-drafter",  name:"Follow-up Drafter",  icon:"📬", color:"#14b8a6",
+  { id:"followup-drafter",  name:"Follow-up Drafter",  icon:"ðŸ“¬", color:"#14b8a6",
     description:"Finds applications with no update in N days and drafts a polite follow-up email.",
     configFields:[{ key:"staleDays", label:"Days without update", type:"number", default:7 }] },
-  { id:"profile-optimizer", name:"Profile Optimizer",  icon:"🧠", color:"#a855f7",
+  { id:"profile-optimizer", name:"Profile Optimizer",  icon:"ðŸ§ ", color:"#a855f7",
     description:"Scans hot-match job descriptions and recommends skills to add to your profile.",
     configFields:[{ key:"minFreq", label:"Min appearances", type:"number", default:3 }] },
-  { id:"salary-analyst",    name:"Salary Analyst",     icon:"💰", color:"#f59e0b",
+  { id:"salary-analyst",    name:"Salary Analyst",     icon:"ðŸ’°", color:"#f59e0b",
     description:"Extracts salary ranges from job descriptions and gives you a market-rate breakdown.",
     configFields:[] },
-  { id:"cold-scout",        name:"Cold Apply Scout",   icon:"🔭", color:"#22c55e",
+  { id:"cold-scout",        name:"Cold Apply Scout",   icon:"ðŸ”­", color:"#22c55e",
     description:"Finds ATS-direct job links at top companies matching your target roles.",
     configFields:[{ key:"minScore", label:"Min score", type:"number", default:3.0 }] },
 ];
@@ -1666,9 +1680,9 @@ function runOutreachWriter(config = {}) {
     const topSkills = matched.slice(0,3).join(", ") || skills.slice(0,2).join(", ") || "relevant skills";
     let message;
     if (tone === "Concise") {
-      message = `Hi [Recruiter],\n\nI noticed ${job.company} is hiring for ${job.title}. My background in ${topSkills} aligns well — would love to connect.\n\n${firstName}`;
+      message = `Hi [Recruiter],\n\nI noticed ${job.company} is hiring for ${job.title}. My background in ${topSkills} aligns well â€” would love to connect.\n\n${firstName}`;
     } else if (tone === "Friendly") {
-      message = `Hey [Recruiter] 👋\n\nSaw the ${job.title} role at ${job.company} and got excited — ${summary ? summary + ". " : ""}Strong experience in ${topSkills}.\n\nWould love to chat!\n\n${firstName}`;
+      message = `Hey [Recruiter] ðŸ‘‹\n\nSaw the ${job.title} role at ${job.company} and got excited â€” ${summary ? summary + ". " : ""}Strong experience in ${topSkills}.\n\nWould love to chat!\n\n${firstName}`;
     } else {
       message = `Dear [Recruiter],\n\nI came across the ${job.title} position at ${job.company} and believe my experience is a strong match. I have worked extensively with ${topSkills}.\n\nI would welcome the opportunity to discuss further.\n\nBest regards,\n${name}`;
     }
@@ -1692,7 +1706,7 @@ function runFollowupDrafter(config = {}) {
   if (!stale.length) return { summary:`No applications older than ${staleDays} days without an update.`, items:[] };
   const items = stale.map(app => {
     const daysSince = Math.round((now - new Date(app.appliedAt || app.savedAt).getTime()) / 86400000);
-    const followUp = `Subject: Following Up — ${app.title} Application\n\nDear Hiring Team,\n\nI submitted my application for the ${app.title} position at ${app.company} approximately ${daysSince} days ago and wanted to follow up to reiterate my strong interest.\n\nPlease let me know if you need any additional information.\n\nBest regards,\n${name}\n${email}${phone ? "\n" + phone : ""}`;
+    const followUp = `Subject: Following Up â€” ${app.title} Application\n\nDear Hiring Team,\n\nI submitted my application for the ${app.title} position at ${app.company} approximately ${daysSince} days ago and wanted to follow up to reiterate my strong interest.\n\nPlease let me know if you need any additional information.\n\nBest regards,\n${name}\n${email}${phone ? "\n" + phone : ""}`;
     return { app:{ id:app.id, title:app.title, company:app.company, daysSince, appliedAt:app.appliedAt||app.savedAt }, followUp };
   });
   return { summary:`Found ${items.length} stale application(s). Follow-up drafts ready.`, items };
@@ -1785,11 +1799,11 @@ app.post("/api/agents/:id/run", (req, res) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// BILLING — Stripe Integration
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// BILLING â€” Stripe Integration
 // Set env vars: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
 // Prices: STRIPE_PRICE_PRO (monthly), STRIPE_PRICE_ENTERPRISE (monthly)
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-04-10" })
   : null;
@@ -1895,7 +1909,7 @@ app.post("/api/billing/portal", async (req, res) => {
   }
 });
 
-// POST /api/billing/webhook  — Stripe webhook (raw body)
+// POST /api/billing/webhook  â€” Stripe webhook (raw body)
 app.post("/api/billing/webhook", express.raw({ type: "application/json" }), (req, res) => {
   const sig = req.headers["stripe-signature"];
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -1910,16 +1924,16 @@ app.post("/api/billing/webhook", express.raw({ type: "application/json" }), (req
     const session = event.data.object;
     const sub = { planId: session.metadata?.planId || "pro", customerId: session.customer, subscriptionId: session.subscription, status: "active", startedAt: new Date().toISOString() };
     saveData({ applications, logs, foundJobs, profile: settings.profile, subscription: sub });
-    log("success", `Subscription activated — plan: ${sub.planId}`);
+    log("success", `Subscription activated â€” plan: ${sub.planId}`);
   }
   if (event.type === "customer.subscription.deleted") {
     saveData({ applications, logs, foundJobs, profile: settings.profile, subscription: { planId: "free", status: "cancelled" } });
-    log("info", "Subscription cancelled — reverted to free plan");
+    log("info", "Subscription cancelled â€” reverted to free plan");
   }
   res.json({ received: true });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.get("*", (req, res) => {
   const index = path.join(clientBuild, "index.html");
   if (fs.existsSync(index)) return res.sendFile(index);
@@ -1939,7 +1953,7 @@ function sanitizeSettings(s) {
   };
 }
 
-// ─── New Architecture Routes (Phase 1-4) ──────────────────────────────────────
+// â”€â”€â”€ New Architecture Routes (Phase 1-4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // These endpoints use the new DB layer and are served alongside legacy routes.
 
 import { getLogs, getApplications, getJobs, getPipelineStages } from "./src/storage/db.js";
@@ -1947,7 +1961,7 @@ import { bootstrap } from "./src/bootstrap.js";
 import { generateOutreach, generateInterviewPrep, analyzeSkillGap } from "./src/ai/prompts/outreach.js";
 import { runOutreachCycle, findRecruiters, closeOutreachBrowser } from "./recruiterOutreach.js";
 
-// ─── Recruiter Outreach State ─────────────────────────────────────────────────
+// â”€â”€â”€ Recruiter Outreach State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let outreachLog   = [];   // { recruiter, company, sent, note, sentAt }
 let outreachRunning = false;
 const OUTREACH_FILE = path.join(__dirname, "outreach-log.json");
@@ -1970,7 +1984,7 @@ function sentToday() {
 }
 
 
-// GET /api/db/jobs — jobs from SQLite (scored, paginated)
+// GET /api/db/jobs â€” jobs from SQLite (scored, paginated)
 app.get("/api/db/jobs", async (req, res) => {
   try {
     const { search = "", minScore = 0, limit = 200, offset = 0 } = req.query;
@@ -1979,7 +1993,7 @@ app.get("/api/db/jobs", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/db/applications — applications from SQLite
+// GET /api/db/applications â€” applications from SQLite
 app.get("/api/db/applications", async (req, res) => {
   try {
     const result = await getApplications({ limit: 500 });
@@ -1987,7 +2001,7 @@ app.get("/api/db/applications", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/db/pipeline — kanban stages from SQLite
+// GET /api/db/pipeline â€” kanban stages from SQLite
 app.get("/api/db/pipeline", async (req, res) => {
   try {
     const stages = await getPipelineStages();
@@ -1995,7 +2009,7 @@ app.get("/api/db/pipeline", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/db/logs — workflow logs from SQLite
+// GET /api/db/logs â€” workflow logs from SQLite
 app.get("/api/db/logs", async (req, res) => {
   try {
     const logs = await getLogs(parseInt(req.query.limit) || 200);
@@ -2003,7 +2017,7 @@ app.get("/api/db/logs", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/ai/outreach — generate recruiter outreach message
+// POST /api/ai/outreach â€” generate recruiter outreach message
 app.post("/api/ai/outreach", async (req, res) => {
   try {
     const { job, profile, type = "linkedin_connect" } = req.body;
@@ -2012,7 +2026,7 @@ app.post("/api/ai/outreach", async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// POST /api/ai/interview-prep — generate interview talking points
+// POST /api/ai/interview-prep â€” generate interview talking points
 app.post("/api/ai/interview-prep", async (req, res) => {
   try {
     const { job, profile } = req.body;
@@ -2021,7 +2035,7 @@ app.post("/api/ai/interview-prep", async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// POST /api/ai/skill-gap — analyze skill gap
+// POST /api/ai/skill-gap â€” analyze skill gap
 app.post("/api/ai/skill-gap", async (req, res) => {
   try {
     const { job, profile } = req.body;
@@ -2030,7 +2044,7 @@ app.post("/api/ai/skill-gap", async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// POST /api/ai/cover-letter — generate tailored cover letter
+// POST /api/ai/cover-letter â€” generate tailored cover letter
 app.post("/api/ai/cover-letter", async (req, res) => {
   try {
     const { job, profile } = req.body;
@@ -2040,9 +2054,9 @@ app.post("/api/ai/cover-letter", async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// ─── Recruiter Outreach Routes ────────────────────────────────────────────────
+// â”€â”€â”€ Recruiter Outreach Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// GET /api/outreach — get log + stats
+// GET /api/outreach â€” get log + stats
 app.get("/api/outreach", (req, res) => {
   const today = sentToday();
   const total = outreachLog.filter(r => r.sent).length;
@@ -2050,7 +2064,7 @@ app.get("/api/outreach", (req, res) => {
   res.json({ ok: true, log: outreachLog.slice(0, 100), stats: { today, total, connected, running: outreachRunning } });
 });
 
-// POST /api/outreach/run — trigger an outreach cycle
+// POST /api/outreach/run â€” trigger an outreach cycle
 app.post("/api/outreach/run", async (req, res) => {
   if (outreachRunning) return res.json({ ok: false, message: "Outreach already running" });
 
@@ -2086,7 +2100,7 @@ app.post("/api/outreach/run", async (req, res) => {
     .finally(() => { outreachRunning = false; });
 });
 
-// POST /api/outreach/find — just search for recruiters (no send)
+// POST /api/outreach/find â€” just search for recruiters (no send)
 app.post("/api/outreach/find", async (req, res) => {
   const { company, title = "Technical Recruiter" } = req.body || {};
   if (!company) return res.status(400).json({ ok: false, message: "company required" });
@@ -2100,7 +2114,7 @@ app.post("/api/outreach/find", async (req, res) => {
   }
 });
 
-// PATCH /api/outreach/:index/connected — mark someone as connected
+// PATCH /api/outreach/:index/connected â€” mark someone as connected
 app.patch("/api/outreach/:index/connected", (req, res) => {
   const i = parseInt(req.params.index);
   if (outreachLog[i]) {
@@ -2110,7 +2124,7 @@ app.patch("/api/outreach/:index/connected", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const PORT = process.env.PORT || 3004;
 const server = app.listen(PORT, async () => {
@@ -2118,3 +2132,4 @@ const server = app.listen(PORT, async () => {
   // Wire up new architecture after server is ready
   await bootstrap().catch(err => console.error("Bootstrap error:", err.message));
 });
+

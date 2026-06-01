@@ -776,7 +776,10 @@ async function openWithSimplify(url, job, profile) {
 // ─── LinkedIn Easy Apply Direct Scraper ──────────────────────────────────────
 // Strategy 1: LinkedIn guest API (no login needed, fast, returns JSON)
 // Strategy 2: Playwright with authenticated session (fallback)
-export async function scrapeLinkedInEasyApply(credentials, titles = [], locations = [], maxJobs = 25) {
+export async function scrapeLinkedInEasyApply(credentials, titles = [], locations = [], maxJobs = 25, dateFilter = "week") {
+  // LinkedIn f_TPR param: r86400=today, r604800=week, r2592000=month
+  const tprMap = { today: "r86400", week: "r604800", month: "r2592000" };
+  const f_TPR  = tprMap[dateFilter] || tprMap.week;
   const jobs = [];
 
   // ── Strategy 1: Guest API (no auth required) ────────────────────────────────
@@ -818,6 +821,7 @@ export async function scrapeLinkedInEasyApply(credentials, titles = [], location
           `keywords=${encodeURIComponent(title)}` +
           `&location=${encodeURIComponent(location)}` +
           `&f_LF=f_AL` +
+          `&f_TPR=${f_TPR}` +
           `&sortBy=DD`;       // date descending
 
         await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -923,6 +927,7 @@ async function _scrapeLinkedInGuest(title, location, limit = 10) {
     `keywords=${encodeURIComponent(title)}` +
     `&location=${encodeURIComponent(location)}` +
     `&f_LF=f_AL` +    // Easy Apply only
+    `&f_TPR=${f_TPR}` + // Date filter
     `&sortBy=DD` +     // Date descending
     `&start=0`;
 

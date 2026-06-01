@@ -1879,6 +1879,32 @@ export default function App() {
                           })}
                         </div>
                       </div>
+                      {/* Date Posted Filter */}
+                      <div style={{ marginBottom:16 }}>
+                        <div style={{ fontSize:12, color:"#78716c", fontWeight:500, marginBottom:8 }}>Date Posted</div>
+                        <div style={{ display:"flex", gap:8 }}>
+                          {[
+                            { val:"today", label:"Today",  icon:"⚡" },
+                            { val:"week",  label:"1 Week",  icon:"📅" },
+                            { val:"month", label:"1 Month", icon:"🗓" },
+                          ].map(({ val, label, icon }) => {
+                            const active = (settingsForm.datePostedFilter || "week") === val;
+                            return (
+                              <button key={val} onClick={()=>setSettingsForm(f=>({...f,datePostedFilter:val}))}
+                                style={{
+                                  flex:1, padding:"9px 0", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:600,
+                                  border: active ? "2px solid #2563eb" : "1px solid #e5e3e0",
+                                  background: active ? "#eff6ff" : "#fafaf9",
+                                  color: active ? "#2563eb" : "#78716c",
+                                  transition:"all .15s",
+                                }}>
+                                {icon} {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
                       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, marginBottom:16 }}>
                         <Field label="Interval (min)"><input style={inp} type="number" min={1} value={settingsForm.intervalMinutes} onChange={e=>setSettingsForm(f=>({...f,intervalMinutes:parseInt(e.target.value)}))}/></Field>
                         <Field label="Max jobs / run"><input style={inp} type="number" min={1} value={settingsForm.maxApplicationsPerRun} onChange={e=>setSettingsForm(f=>({...f,maxApplicationsPerRun:parseInt(e.target.value)}))}/></Field>
