@@ -145,57 +145,91 @@ export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }
     await delay(2500, 500);
 
     // ── Multi-step form loop ─────────────────────────────────────────────────
+    const SUBMIT_SEL = [
+      "button[aria-label*='Submit application']",
+      "button:has-text('Submit application')",
+      "button:has-text('Submit Application')",
+    ].join(", ");
+
+    const NEXT_SEL = [
+      "button[aria-label*='Continue to next step']",
+      "button[aria-label*='Review your application']",
+      "button:has-text('Next')",
+      "button:has-text('Review')",
+      "button:has-text('Continue')",
+    ].join(", ");
+
+    let totalFilled = 0;
+    let sameStepCount = 0;
+    let lastPageText = "";
+
     for (let step = 0; step < 20; step++) {
-      await delay(1000, 400);
-      await fillLinkedInStep(page, profile, resumePath);
+      await delay(1200, 400);
 
-      // Check for submit button first
-      const submitBtn = page.locator([
-        "button[aria-label*='Submit application']",
-        "button:has-text('Submit application')",
-        "button:has-text('Submit Application')",
-      ].join(", ")).first();
+      // ── Fill this step with AI mapper first, then fallback ────────────────
+      const stepFilled = await fillLinkedInStep(page, profile, resumePath, jobDetails);
+      totalFilled += stepFilled;
 
+      await delay(800, 200);
+
+      // ── Check for submit ──────────────────────────────────────────────────
+      const submitBtn = page.locator(SUBMIT_SEL).first();
       if (await isVisible(submitBtn)) {
+        await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
         await submitBtn.click();
         await delay(2500, 300);
-        // Check for success confirmation
         const confirmed = await page.locator([
           "h3:has-text('application was sent')",
           "div:has-text('Your application was sent')",
           ".artdeco-inline-feedback--success",
           "h2:has-text('applied')",
-        ].join(", ")).first().isVisible({ timeout: 3000 }).catch(() => false);
+          ".jobs-post-apply-confirmation",
+        ].join(", ")).first().isVisible({ timeout: 4000 }).catch(() => false);
         return {
           success: true,
-          reason: confirmed ? "Submitted via LinkedIn Easy Apply ✅" : "Clicked Submit (unconfirmed)",
+          reason: confirmed
+            ? `LinkedIn Easy Apply submitted ✅ (${totalFilled} fields filled)`
+            : `Clicked Submit — unconfirmed (${totalFilled} fields filled)`,
           autoApplied: true,
           jobDetails,
         };
       }
 
-      // Check for Next / Review / Continue
-      const nextBtn = page.locator([
-        "button[aria-label*='Continue to next step']",
-        "button[aria-label*='Review your application']",
-        "button:has-text('Next')",
-        "button:has-text('Review')",
-        "button:has-text('Continue')",
-      ].join(", ")).first();
+      // ── Detect error messages and try to scroll past them ────────────────
+      const errorMsg = page.locator(".artdeco-inline-feedback--error:visible, [data-test-form-element-error-message]:visible").first();
+      if (await isVisible(errorMsg)) {
+        const errText = await errorMsg.innerText().catch(() => "");
+        log.debug?.(`LinkedIn step ${step}: error visible — "${errText.slice(0,80)}"`);
+        // Try filling required fields that AI missed
+        await fillLinkedInStep(page, profile, resumePath, jobDetails);
+        await delay(600, 200);
+      }
 
+      // ── Next / Review / Continue ─────────────────────────────────────────
+      const nextBtn = page.locator(NEXT_SEL).first();
       if (await isVisible(nextBtn)) {
+        // Detect infinite loop — same page content, no progress
+        const pageText = await page.locator(".jobs-easy-apply-modal").innerText().catch(() => "");
+        if (pageText === lastPageText) {
+          sameStepCount++;
+          if (sameStepCount >= 3) {
+            result.reason = `Stuck on step ${step} — required field AI could not fill`;
+            break;
+          }
+        } else {
+          sameStepCount = 0;
+        }
+        lastPageText = pageText;
+        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
         await nextBtn.click();
         continue;
       }
 
-      // Dismiss any error/warning modals
-      const dismissBtn = page.locator("button[aria-label*='Dismiss']").first();
-      if (await isVisible(dismissBtn)) {
-        await dismissBtn.click();
-        continue;
-      }
+      // ── Dismiss modal / error ─────────────────────────────────────────────
+      const dismissBtn = page.locator("button[aria-label*='Dismiss'], button[aria-label*='dismiss']").first();
+      if (await isVisible(dismissBtn)) { await dismissBtn.click(); continue; }
 
-      result.reason = "Could not find Next or Submit button";
+      result.reason = "No Next or Submit button found";
       break;
     }
     return { ...result, reason: result.reason || "Form exceeded step limit", jobDetails };
@@ -206,63 +240,87 @@ export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }
   }
 }
 
-async function fillLinkedInStep(page, profile, resumePath) {
-  // ── Phone number ─────────────────────────────────────────────────────────
-  const phoneInput = page.locator([
-    "input[id*='phoneNumber']",
-    "input[name*='phone']",
-    "input[id*='phone']",
-  ].join(", ")).first();
-  if (await isVisible(phoneInput) && !(await phoneInput.inputValue().catch(() => ""))) {
-    await phoneInput.fill(profile.phone || "");
-  }
+// Returns number of fields filled on this step
+async function fillLinkedInStep(page, profile, resumePath, job = {}) {
+  let filled = 0;
 
-  // ── Resume upload ─────────────────────────────────────────────────────────
+  // ── 1. Resume upload (always first — LinkedIn caches it after first upload) ─
   if (resumePath && fs.existsSync(resumePath)) {
     const fileInput = page.locator("input[type='file']").first();
     if (await isVisible(fileInput)) {
       await fileInput.setInputFiles(resumePath).catch(() => {});
-      await delay(2500, 500);
+      await delay(2000, 500);
+      filled++;
     }
   }
 
-  // ── Yes/No questions — click "Yes" labels ──────────────────────────────────
-  const yesLabels = await page.locator("label:has-text('Yes')").all();
-  for (const label of yesLabels) {
-    if (await isVisible(label)) await label.click().catch(() => {});
-  }
-  // Also handle radio inputs with value "Yes"
-  for (const r of await page.locator("input[type='radio'][value='Yes'], input[type='radio'][value='yes']").all()) {
-    await r.check().catch(() => {});
+  // ── 2. AI mapper — reads every visible field and fills intelligently ────────
+  try {
+    const formFields = await extractFormFields(page);
+    if (formFields.length > 0) {
+      const mapping = await aiMapFields(formFields, profile, job);
+      if (Object.keys(mapping).length > 0) {
+        const { filled: aiFilled } = await applyFieldMapping(page, mapping, profile, formFields);
+        filled += aiFilled;
+      }
+    }
+  } catch { /* AI mapper unavailable — use fallbacks below */ }
+
+  // ── 3. Hard-coded fallbacks for fields AI often misses on LinkedIn ──────────
+
+  // Phone
+  const phoneInput = page.locator([
+    "input[id*='phoneNumber']", "input[name*='phone']", "input[id*='phone']",
+  ].join(", ")).first();
+  if (await isVisible(phoneInput) && !(await phoneInput.inputValue().catch(() => ""))) {
+    await phoneInput.fill(profile.phone || "");
+    filled++;
   }
 
-  // ── Text / number / tel inputs ─────────────────────────────────────────────
-  const inputs = await page.locator("input[type='text']:visible, input[type='tel']:visible, input[type='number']:visible").all();
-  for (const input of inputs) {
-    const val = await input.inputValue().catch(() => "");
-    if (val) continue;   // already filled
-    const lbl = await labelFor(input);
-    if (!lbl) continue;
-    if      (lbl.match(/city|location|address/))         await input.fill(profile.location   || "Seattle, WA").catch(() => {});
-    else if (lbl.match(/linkedin|profile.*url/))          await input.fill(profile.linkedinUrl || "").catch(() => {});
-    else if (lbl.match(/website|portfolio|github/))       await input.fill(profile.website    || "").catch(() => {});
-    else if (lbl.match(/year|experience/))                await input.fill(String(profile.yearsExperience || "5")).catch(() => {});
-    else if (lbl.match(/salary|compensation|expected/))   await input.fill(profile.expectedSalary || "").catch(() => {});
-    else if (lbl.match(/first.*name|fname/))              await input.fill(profile.name?.split(" ")[0] || "").catch(() => {});
-    else if (lbl.match(/last.*name|lname|surname/))       await input.fill(profile.name?.split(" ").slice(1).join(" ") || "").catch(() => {});
+  // Work authorization radios — LinkedIn asks these every time
+  // "Are you legally authorized to work in [country]?" → Yes
+  for (const radio of await page.locator("input[type='radio']").all()) {
+    const lbl = (await labelFor(radio)).toLowerCase();
+    const val = (await radio.getAttribute("value") || "").toLowerCase();
+    if (!await isVisible(radio)) continue;
+    // Authorized → Yes
+    if (lbl.match(/authorized|authorization|legally.*work|eligible.*work/) && val === "yes") {
+      await radio.check().catch(() => {}); filled++;
+    }
+    // Sponsorship → No
+    if (lbl.match(/sponsor|visa.*sponsor|require.*sponsor/) && val === "no") {
+      await radio.check().catch(() => {}); filled++;
+    }
   }
 
-  // ── Dropdowns ──────────────────────────────────────────────────────────────
+  // Dropdowns — country, work auth, sponsor
   for (const sel of await page.locator("select:visible").all()) {
     const current = await sel.inputValue().catch(() => "");
     if (current) continue;
-    const lbl = await labelFor(sel);
-    if      (lbl.includes("country"))                     await sel.selectOption({ label: "United States" }).catch(() => {});
-    else if (lbl.match(/authorize|work.*in|eligible/))    await sel.selectOption({ index: 1 }).catch(() => {});
-    else if (lbl.includes("sponsor"))                     await sel.selectOption({ label: "No" }).catch(() => {});
-    else if (lbl.match(/gender|ethnicity|veteran|disability/)) { /* skip demographic fields */ }
-    else                                                   await sel.selectOption({ index: 1 }).catch(() => {});
+    const lbl = (await labelFor(sel)).toLowerCase();
+    if      (lbl.includes("country"))                     { await sel.selectOption({ label: "United States" }).catch(() => {}); filled++; }
+    else if (lbl.match(/authorized|work.*auth|eligible/)) { await sel.selectOption({ value: "yes" }).catch(async () => { await sel.selectOption({ index: 1 }).catch(() => {}); }); filled++; }
+    else if (lbl.includes("sponsor"))                     { await sel.selectOption({ value: "no"  }).catch(async () => { await sel.selectOption({ label: "No" }).catch(() => {}); }); filled++; }
+    else if (lbl.match(/gender|ethnicity|veteran|disability/)) { /* skip EEO */ }
+    else if (lbl.match(/how many years|years of experience/)) {
+      const yrs = String(profile.yearsExperience || "5");
+      await sel.selectOption({ value: yrs }).catch(async () => { await sel.selectOption({ index: 1 }).catch(() => {}); });
+      filled++;
+    }
   }
+
+  // Numeric "years of experience" text inputs AI might miss
+  for (const input of await page.locator("input[type='number']:visible, input[type='text']:visible").all()) {
+    const val = await input.inputValue().catch(() => "");
+    if (val) continue;
+    const lbl = (await labelFor(input)).toLowerCase();
+    if (lbl.match(/how many years|years of exp|years.*experience/)) {
+      await input.fill(String(profile.yearsExperience || "5")).catch(() => {});
+      filled++;
+    }
+  }
+
+  return filled;
 }
 
 // ─── Indeed Easy Apply ────────────────────────────────────────────────────────
