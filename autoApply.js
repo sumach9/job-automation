@@ -137,8 +137,10 @@ export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }
       if (await isVisible(el)) { btn = el; break; }
     }
     if (!btn) {
-      // Not an Easy Apply job — log and skip (don't open browser)
-      return { ...result, reason: "No Easy Apply button — external application", jobDetails };
+      // Not an Easy Apply job — open in Chrome for manual apply
+      try { await execAsync(`start "" "${jobUrl}"`); } catch {}
+      await page.close().catch(() => {});
+      return { ...result, reason: "No Easy Apply — opened in Chrome for manual apply", browserOpened: true, jobDetails };
     }
 
     await btn.click();

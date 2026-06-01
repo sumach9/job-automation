@@ -904,17 +904,88 @@ async function runCycle() {
   log("info", `Cycle complete â€” ${newThisCycle} new applications queued`);
 
   if (newThisCycle > 0 && settings.emailNotifications) {
-    const rows = applications
-      .slice(0, newThisCycle)
-      .map((a) => `<tr><td>${a.title}</td><td>${a.company}</td><td>${a.location}</td><td>${a.platform}</td><td>${a.status}</td></tr>`)
-      .join("");
+    const notifyTo = settings.notifyEmail || settings.emailUser;
+    const batch = applications.slice(0, newThisCycle);
+
+    const statusMeta = {
+      "auto-applied":    { color: "#16a34a", bg: "#dcfce7", label: "✅ Auto-Applied" },
+      "browser-opened":  { color: "#d97706", bg: "#fef9c3", label: "🌐 Opened in Chrome" },
+      "simplify-opened": { color: "#7c3aed", bg: "#f3e8ff", label: "🪄 Pre-filled" },
+      "apply-failed":    { color: "#dc2626", bg: "#fee2e2", label: "❌ Failed" },
+      "queued-manual":   { color: "#78716c", bg: "#f5f5f4", label: "📋 Queued" },
+    };
+
+    const autoAppliedCount  = batch.filter(a => a.status === "auto-applied").length;
+    const browserCount      = batch.filter(a => a.status === "browser-opened" || a.status === "simplify-opened").length;
+    const failedCount       = batch.filter(a => a.status === "apply-failed").length;
+
+    const rows = batch.map((a, i) => {
+      const sm = statusMeta[a.status] || { color: "#78716c", bg: "#f5f5f4", label: a.status };
+      const reason = a.autoApplyNote
+        ? `<div style="font-size:11px;color:#78716c;margin-top:3px;">${a.autoApplyNote}</div>`
+        : "";
+      return `
+        <tr style="border-bottom:1px solid #f0eeec;background:${i % 2 === 0 ? "#fff" : "#fafaf9"};">
+          <td style="padding:10px 14px;">
+            <div style="font-weight:600;color:#1c1917;font-size:13px;">${a.title}</div>
+            <div style="color:#78716c;font-size:12px;margin-top:2px;">${a.company}${a.location ? " · " + a.location : ""}</div>
+          </td>
+          <td style="padding:10px 14px;vertical-align:top;">
+            <span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:2px 7px;font-size:11px;">${a.platform || "—"}</span>
+          </td>
+          <td style="padding:10px 14px;vertical-align:top;white-space:nowrap;">
+            <span style="background:${sm.bg};color:${sm.color};border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;">${sm.label}</span>
+            ${reason}
+          </td>
+          <td style="padding:10px 14px;vertical-align:top;">
+            <a href="${a.url}" style="background:#1c1917;color:#fff;border-radius:6px;padding:5px 11px;font-size:11px;font-weight:600;text-decoration:none;">Apply →</a>
+          </td>
+        </tr>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#fafaf9;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <div style="max-width:680px;margin:28px auto;background:#fff;border-radius:14px;border:1px solid #e5e3e0;overflow:hidden;">
+    <div style="background:#1c1917;padding:22px 24px;">
+      <span style="color:#fff;font-size:17px;font-weight:700;">⚡ JobPilot — ${newThisCycle} New Jobs</span>
+      <div style="color:#a8a29e;font-size:12px;margin-top:5px;">${new Date().toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;background:#fafaf9;border-bottom:1px solid #e5e3e0;">
+      <tr>
+        ${[
+          ["✅ Auto-Applied", autoAppliedCount, "#16a34a"],
+          ["🌐 Open in Chrome", browserCount, "#d97706"],
+          ["❌ Failed", failedCount, "#dc2626"],
+        ].map(([lbl, val, c]) => `
+          <td style="padding:12px;text-align:center;border-right:1px solid #e5e3e0;">
+            <div style="font-size:22px;font-weight:700;color:${c};">${val}</div>
+            <div style="font-size:10px;color:#a8a29e;margin-top:2px;">${lbl}</div>
+          </td>`).join("")}
+      </tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr style="background:#f5f4f2;border-bottom:1px solid #e5e3e0;">
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;">Job</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;">Platform</th>
+          <th style="padding:8px 14px;text-align:left;font-size:10px;color:#a8a29e;font-weight:600;text-transform:uppercase;">Status / Reason</th>
+          <th style="padding:8px 14px;"></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="padding:14px 18px;background:#fafaf9;border-top:1px solid #f0eeec;text-align:center;">
+      <div style="font-size:11px;color:#a8a29e;">Sent by <strong style="color:#1c1917;">JobPilot</strong> · <a href="http://localhost:3004" style="color:#2563eb;">Open Dashboard</a></div>
+    </div>
+  </div>
+</body>
+</html>`;
+
     await sendEmail(
-      `Job Bot: ${newThisCycle} new jobs found`,
-      `<h2>New Applications Queued</h2>
-      <table border="1" cellpadding="6" style="border-collapse:collapse">
-        <tr><th>Title</th><th>Company</th><th>Location</th><th>Platform</th><th>Status</th></tr>
-        ${rows}
-      </table>`
+      `JobPilot: ${newThisCycle} new jobs — ${autoAppliedCount} auto-applied, ${browserCount} need review`,
+      html,
+      notifyTo
     ).catch((e) => log("error", "Email send failed", e.message));
   }
 
