@@ -665,6 +665,93 @@ function AgentsTab({ showToast }) {
 }
 
 // ─── Billing Tab ──────────────────────────────────────────────────────────────
+// ─── Google Sheets Card ───────────────────────────────────────────────────────
+function GoogleSheetsCard({ showToast }) {
+  const [status, setStatus] = useState(null);   // { configured, sheetId }
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null); // { ok, jobsWritten, appsWritten, ts }
+
+  useEffect(() => {
+    apiFetch(`${API}/sheets-status`).then(r => r.json()).then(setStatus).catch(() => {});
+  }, []);
+
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      const d = await apiFetch(`${API}/sync-sheets`, { method:"POST" }).then(r => r.json());
+      if (d.ok) {
+        setLastSync({ ok:true, jobsWritten:d.jobsWritten, appsWritten:d.appsWritten, ts:new Date().toLocaleTimeString() });
+        showToast(`Synced! ${d.jobsWritten} jobs + ${d.appsWritten} apps → Google Sheets`, "success");
+      } else {
+        showToast(d.message || "Sync failed", "error");
+      }
+    } catch (e) {
+      showToast("Sync error: " + e.message, "error");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  const configured = status?.configured;
+
+  return (
+    <div style={{ background:"#fff", borderRadius:14, padding:"22px 24px", border:"1px solid #e5e3e0" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          {/* Google Sheets green icon */}
+          <div style={{ width:34, height:34, borderRadius:8, background:"#e8f5e9", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>📊</div>
+          <div>
+            <div style={{ fontSize:14, fontWeight:700, color:"#1c1917" }}>Google Sheets Export</div>
+            <div style={{ fontSize:12, color:"#78716c" }}>Auto-syncs jobs + applications after each run</div>
+          </div>
+        </div>
+        <span style={{ fontSize:12, fontWeight:600, padding:"3px 10px", borderRadius:20,
+          background: configured ? "#dcfce7" : "#fef3c7",
+          color:      configured ? "#16a34a" : "#d97706",
+          border:     `1px solid ${configured ? "#bbf7d0" : "#fde68a"}`,
+        }}>
+          {configured ? "✓ Connected" : "⚠ Not configured"}
+        </span>
+      </div>
+
+      {configured ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          <div style={{ padding:"10px 14px", background:"#f0fdf4", borderRadius:8, border:"1px solid #bbf7d0", fontSize:12, color:"#15803d" }}>
+            Sheet ID ending in <strong>…{status.sheetId}</strong> · Two tabs: <em>Jobs Found</em> + <em>Applications</em>
+          </div>
+          {lastSync && (
+            <div style={{ padding:"8px 14px", background:"#eff6ff", borderRadius:8, border:"1px solid #bfdbfe", fontSize:12, color:"#2563eb" }}>
+              Last sync at {lastSync.ts} — {lastSync.jobsWritten} jobs, {lastSync.appsWritten} applications written
+            </div>
+          )}
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            style={{ padding:"9px 18px", borderRadius:8, border:"none", background: syncing?"#d1fae5":"#16a34a", color:"#fff", fontWeight:600, fontSize:13, cursor:syncing?"not-allowed":"pointer", alignSelf:"flex-start" }}
+          >
+            {syncing ? "Syncing…" : "Sync to Sheets Now"}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          <div style={{ fontSize:13, color:"#57534e", lineHeight:1.6 }}>
+            Add these 3 lines to your <code style={{ background:"#f5f4f2", padding:"1px 5px", borderRadius:4 }}>.env</code> file, then restart the server:
+          </div>
+          <div style={{ background:"#1c1917", borderRadius:8, padding:"14px 16px", fontFamily:"monospace", fontSize:12, color:"#a8a29e", lineHeight:1.8, overflowX:"auto" }}>
+            <span style={{ color:"#86efac" }}>GOOGLE_SHEET_ID</span>=<span style={{ color:"#fcd34d" }}>your_sheet_id_from_url</span><br/>
+            <span style={{ color:"#86efac" }}>GOOGLE_SERVICE_ACCOUNT_EMAIL</span>=<span style={{ color:"#fcd34d" }}>sa@project.iam.gserviceaccount.com</span><br/>
+            <span style={{ color:"#86efac" }}>GOOGLE_PRIVATE_KEY</span>=<span style={{ color:"#fcd34d" }}>"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"</span>
+          </div>
+          <div style={{ fontSize:12, color:"#78716c", lineHeight:1.6 }}>
+            <strong>Steps:</strong> Google Cloud Console → Enable Sheets API → Create Service Account → Download JSON key →{" "}
+            Share your Google Sheet with the service account email (Editor) → copy the 3 values above.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BillingTab({ showToast }) {
   const [plans, setPlans] = useState([]);
   const [sub, setSub] = useState(null);
@@ -1826,6 +1913,9 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Google Sheets Export */}
+                    <GoogleSheetsCard showToast={showToast} />
+
                     {/* API Keys status */}
                     <div style={{ background:"#fff", borderRadius:14, padding:"22px 24px", border:"1px solid #e5e3e0" }}>
                       <div style={{ fontSize:14, fontWeight:700, color:"#1c1917", marginBottom:14 }}>API Keys (.env)</div>
@@ -1836,6 +1926,7 @@ export default function App() {
                           ["LINKEDIN credentials", settings?.linkedinConfigured, "Auto-apply"],
                           ["TICKBIG credentials", settings?.tickbigConfigured, "Job scraping (paid-to-apply)"],
                           ["Email (Gmail)", settings?.emailConfigured, "Notifications"],
+                          ["GOOGLE_SHEET_ID", settings?.sheetsConfigured, "Sheets export"],
                           ["RESUME_PATH", !!settings?.profile?.resumePath, "File"],
                         ].map(([key,ok,desc]) => (
                           <div key={key} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"9px 14px", background:"#fafaf9", borderRadius:8, border:"1px solid #f0eeec" }}>

@@ -16,6 +16,7 @@ import { scoreJob, scoreLabel, scoreColor } from "./scorer.js";
 import { generateViralImage } from "./imageGen.js";
 import { parseResume } from "./resumeParser.js";
 import { scrapeTickBig, invalidateTickBigToken } from "./tickbigScraper.js";
+import { syncToGoogleSheets, isSheetsConfigured } from "./src/integrations/googleSheets.js";
 
 dotenv.config();
 
@@ -869,6 +870,16 @@ async function runCycle() {
   // Persist found jobs after each cycle
   saveData({ applications, logs, foundJobs });
 
+  // Sync to Google Sheets if configured (fire-and-forget — don't block cycle)
+  if (isSheetsConfigured()) {
+    syncToGoogleSheets(foundJobs, applications)
+      .then(r => {
+        if (r.ok) log("success", `Google Sheets synced — ${r.jobsWritten} jobs, ${r.appsWritten} applications`);
+        else log("warning", `Google Sheets sync failed: ${r.error}`);
+      })
+      .catch(e => log("warning", `Google Sheets sync error: ${e.message}`));
+  }
+
   log("info", `Cycle complete — ${newThisCycle} new applications queued`);
 
   if (newThisCycle > 0 && settings.emailNotifications) {
@@ -1254,6 +1265,35 @@ app.post("/api/digest", async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, message: err.message });
   }
+});
+
+// POST /api/sync-sheets — push jobs + applications to Google Sheets now
+app.post("/api/sync-sheets", async (req, res) => {
+  if (!isSheetsConfigured()) {
+    return res.status(400).json({
+      ok: false,
+      message: "Google Sheets not configured. Add GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_EMAIL, and GOOGLE_PRIVATE_KEY to your .env file.",
+    });
+  }
+  try {
+    const result = await syncToGoogleSheets(foundJobs, applications);
+    if (result.ok) {
+      log("success", `Google Sheets manual sync — ${result.jobsWritten} jobs, ${result.appsWritten} apps`);
+      res.json({ ok: true, ...result });
+    } else {
+      res.status(500).json({ ok: false, message: result.error });
+    }
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
+// GET /api/sheets-status — check if Google Sheets is configured
+app.get("/api/sheets-status", (req, res) => {
+  res.json({
+    configured: isSheetsConfigured(),
+    sheetId: process.env.GOOGLE_SHEET_ID ? `...${process.env.GOOGLE_SHEET_ID.slice(-6)}` : null,
+  });
 });
 
 app.post("/api/test-email", async (req, res) => {
@@ -1887,6 +1927,7 @@ function sanitizeSettings(s) {
     serpApiConfigured:  !!serpApiKey,
     linkedinConfigured: !!linkedinPassword && !!s.linkedinEmail,
     tickbigConfigured:  !!tickbigPassword  && !!s.tickbigEmail,
+    sheetsConfigured:   isSheetsConfigured(),
   };
 }
 
