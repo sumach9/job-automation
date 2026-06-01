@@ -1,11 +1,12 @@
-// ─── TickBig Razorpay Payment Details Probe ──────────────────────────────────
+﻿// â”€â”€â”€ TickBig Razorpay Payment Details Probe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Logs in, clicks Apply, and extracts the Razorpay checkout details
 // (amount, plan name, etc.) to confirm this is a paid apply model.
 
 import { chromium } from "playwright";
 
-const EMAIL    = "chidarasuma0209@gmail.com";
-const PASSWORD = "&tSbbYP+XFF3_U9";
+import dotenv from "dotenv"; dotenv.config();
+const EMAIL    = process.env.TICKBIG_EMAIL;
+const PASSWORD = process.env.TICKBIG_PASSWORD;
 
 (async () => {
   const browser = await chromium.launch({
@@ -68,8 +69,8 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     }
   });
 
-  // ── Login ─────────────────────────────────────────────────────────────────
-  console.log("→ Logging in…");
+  // â”€â”€ Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  console.log("â†’ Logging inâ€¦");
   await page.goto("https://www.tickbig.com/signin", { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForTimeout(1500);
 
@@ -78,11 +79,11 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
   await page.locator("button.animeBtn, button[type='submit']").first().click();
 
   try { await page.waitForURL("**/home**", { timeout: 20_000 }); } catch {}
-  console.log("✓ Logged in, URL:", page.url());
+  console.log("âœ“ Logged in, URL:", page.url());
   await page.waitForTimeout(2000);
 
-  // ── Go to Jobs ────────────────────────────────────────────────────────────
-  console.log("→ Going to /jobs…");
+  // â”€â”€ Go to Jobs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  console.log("â†’ Going to /jobsâ€¦");
   await page.goto("https://www.tickbig.com/jobs", { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForTimeout(3000);
 
@@ -98,8 +99,8 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
   const cards = await page.locator("[class*='jpfiCard'], [class*='jobCard'], .job-card, [class*='card']").all();
   console.log(`Found ${cards.length} potential job cards`);
 
-  // ── Click Apply ───────────────────────────────────────────────────────────
-  console.log("→ Clicking Apply…");
+  // â”€â”€ Click Apply â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  console.log("â†’ Clicking Applyâ€¦");
   const applyBtn = await page.locator("button.jpfiCard__six-btn-1, button:has-text('Apply')").first();
 
   // Get the job context around this button
@@ -112,7 +113,7 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
   await applyBtn.click();
   await page.waitForTimeout(5000);  // wait for Razorpay to fully initialize
 
-  // ── Read results ──────────────────────────────────────────────────────────
+  // â”€â”€ Read results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Check for Razorpay iframe
   const razorpayFrame = page.frameLocator('iframe[src*="razorpay"]');
   let frameTitle = "";
@@ -141,10 +142,10 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
   // Get all tickbig API requests
   const tickbigCalls = razorpayRequests.filter(r => r.url.includes("api.tickbig.com"));
 
-  // ── Report ────────────────────────────────────────────────────────────────
-  console.log("\n══════════════════════════════════════════════════════════");
+  // â”€â”€ Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  TICKBIG API CALLS:");
-  console.log("══════════════════════════════════════════════════════════");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   if (tickbigCalls.length === 0) {
     console.log("  (none)");
   } else {
@@ -154,25 +155,25 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     });
   }
 
-  console.log("\n══════════════════════════════════════════════════════════");
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  RAZORPAY ORDERS CAPTURED:");
-  console.log("══════════════════════════════════════════════════════════");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   if (capturedOrders.length === 0) {
-    console.log("  (none — hook may have missed initialization)");
+    console.log("  (none â€” hook may have missed initialization)");
   } else {
     capturedOrders.forEach(o => console.log(" ", JSON.stringify(o, null, 2)));
   }
 
-  console.log("\n══════════════════════════════════════════════════════════");
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  RAZORPAY IFRAME/MODAL:");
-  console.log("══════════════════════════════════════════════════════════");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  Frame title:", frameTitle || "(empty)");
   console.log("  Frame amount:", frameAmount || "(empty)");
   console.log("  Backdrop HTML snippet:", backdropHtml.slice(0, 300) || "(empty)");
 
   // Last resort: grab anything on page that looks like a price
   const pageText = await page.innerText("body").catch(() => "");
-  const priceMatch = pageText.match(/₹[\d,]+|Rs\.?\s*[\d,]+|INR\s*[\d,]+|amount[:\s]*[\d,]+/gi);
+  const priceMatch = pageText.match(/â‚¹[\d,]+|Rs\.?\s*[\d,]+|INR\s*[\d,]+|amount[:\s]*[\d,]+/gi);
   console.log("\n  Price patterns found on page:", priceMatch?.slice(0, 10) || "(none)");
 
   // Any modal text
@@ -181,9 +182,10 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     console.log("\n  MODAL TEXT:", modalText.slice(0, 400));
   }
 
-  console.log("\n══════════════════════════════════════════════════════════");
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  CURRENT URL:", page.url());
-  console.log("══════════════════════════════════════════════════════════\n");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\n");
 
   await browser.close();
 })();
+

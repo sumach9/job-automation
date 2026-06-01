@@ -36,7 +36,7 @@ function getLiveStats() {
 // ── SVG helpers ───────────────────────────────────────────────────────────────
 const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
-function buildSVG(stats) {
+function buildSVG(stats, profile = {}) {
   const { total, applied, simplify, queued, companies, excellent } = stats;
   const totalActions = applied + simplify + queued;
 
@@ -232,20 +232,28 @@ function buildSVG(stats) {
   ${cards.map((c, i) => cardSVG(c, i)).join("")}
 
   <!-- ── Author / footer ── -->
+  ${(() => {
+    const authorName = esc(profile.name || process.env.APPLICANT_NAME || "Job Seeker");
+    const authorRole = esc(profile.targetRoles?.split(",")[0]?.trim() || "Software Engineer");
+    const authorLoc  = esc(profile.location || process.env.APPLICANT_LOCATION || "");
+    const initials   = authorName.trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase().slice(0,2) || "JS";
+    const subtitle   = [authorRole, authorLoc].filter(Boolean).join(" · ");
+    return `
   <circle cx="67" cy="589" r="20" fill="url(#hg)"/>
   <text x="67" y="595" font-family="${SANS}" font-size="14" font-weight="800"
-        fill="white" text-anchor="middle">SC</text>
+        fill="white" text-anchor="middle">${initials}</text>
   <text x="96" y="582" font-family="${SANS}" font-size="14" font-weight="700"
-        fill="rgba(255,255,255,0.9)">Suma Chidara</text>
+        fill="rgba(255,255,255,0.9)">${authorName}</text>
   <text x="96" y="600" font-family="${SANS}" font-size="12"
-        fill="${C.dim}">Data Scientist · Seattle, WA</text>
+        fill="${C.dim}">${subtitle}</text>`;
+  })()}
 
   <!-- GitHub badge -->
   <rect x="370" y="568" width="290" height="36" rx="18"
         fill="rgba(255,255,255,0.05)" stroke="${C.border}" stroke-width="1"/>
   <text x="388" y="591" font-family="${SANS}" font-size="16">⭐</text>
   <text x="414" y="591" font-family="${MONO}" font-size="12" font-weight="600"
-        fill="rgba(255,255,255,0.7)">github.com/sumach9/job-automation</text>
+        fill="rgba(255,255,255,0.7)">${esc(process.env.GITHUB_REPO || "github.com/your/job-automation")}</text>
 
   <!-- ── Terminal panel ── -->
   <rect x="${termX}" y="${termY}" width="${termW}" height="${termH}" rx="16"
@@ -279,9 +287,9 @@ function buildSVG(stats) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export async function generateViralImage(outputPath) {
+export async function generateViralImage(outputPath, profile = {}) {
   const stats = getLiveStats();
-  const svg   = buildSVG(stats);
+  const svg   = buildSVG(stats, profile);
 
   const png = await sharp(Buffer.from(svg))
     .png({ quality: 100, compressionLevel: 6 })

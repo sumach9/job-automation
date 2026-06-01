@@ -1,8 +1,9 @@
-// Intercept the actual Authorization header the React app uses when fetching jobs
+﻿// Intercept the actual Authorization header the React app uses when fetching jobs
 import { chromium } from "playwright";
 
-const EMAIL    = "chidarasuma0209@gmail.com";
-const PASSWORD = "&tSbbYP+XFF3_U9";
+import dotenv from "dotenv"; dotenv.config();
+const EMAIL    = process.env.TICKBIG_EMAIL;
+const PASSWORD = process.env.TICKBIG_PASSWORD;
 
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 const context = await browser.newContext({
@@ -20,7 +21,7 @@ context.on("request", req => {
     capturedCookies = headers["cookie"] || "";
     console.log("\n=== JOBS REQUEST CAPTURED ===");
     console.log("URL:", req.url());
-    console.log("Authorization:", headers["authorization"]?.slice(0, 60) + "…");
+    console.log("Authorization:", headers["authorization"]?.slice(0, 60) + "â€¦");
     console.log("Cookie:", (headers["cookie"] || "(none)").slice(0, 100));
     console.log("Origin:", headers["origin"] || "(none)");
     console.log("All headers:", JSON.stringify(headers, null, 2).slice(0, 800));
@@ -36,8 +37,8 @@ await page.locator("button.animeBtn, button[type='submit']").first().click();
 try { await page.waitForURL("**/home**", { timeout: 20_000 }); } catch {}
 await page.waitForTimeout(2000);
 
-// Navigate to /jobs — this will trigger the React app to fetch jobs (we intercept it)
-console.log("Navigating to /jobs to trigger jobs API call…");
+// Navigate to /jobs â€” this will trigger the React app to fetch jobs (we intercept it)
+console.log("Navigating to /jobs to trigger jobs API callâ€¦");
 await page.goto("https://www.tickbig.com/jobs", { waitUntil: "domcontentloaded", timeout: 30_000 });
 await page.waitForTimeout(3000);
 
@@ -81,3 +82,4 @@ if (capturedAuth) {
 }
 
 await browser.close();
+

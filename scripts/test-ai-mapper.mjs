@@ -20,20 +20,21 @@ const mockFormFields = [
   { id: "work_auth",     name: "work_auth",       type: "select",  placeholder: "",               ariaLabel: "",              label: "Work Authorization", key: "work_auth", options: [{ value: "", text: "Select…" }, { value: "citizen", text: "US Citizen" }, { value: "gc", text: "Green Card" }, { value: "visa", text: "Work Visa" }] },
 ];
 
+// Profile values read from .env — no personal data hardcoded in source
 const mockProfile = {
-  name:            "Suma Chidara",
-  firstName:       "Suma",
-  lastName:        "Chidara",
-  email:           "chidarasuma0209@gmail.com",
-  phone:           "8017840516",
-  location:        "Seattle, WA",
-  linkedinUrl:     "https://linkedin.com/in/sumachidara",
-  website:         "https://github.com/sumachidara",
-  yearsExperience: 5,
-  expectedSalary:  "$110,000",
-  skills:          ["Python", "SQL", "Machine Learning", "Data Science", "Tableau", "AWS"],
-  summary:         "Data scientist with 5 years experience in ML, NLP and data engineering.",
-  resumePath:      "C:\\Users\\polak\\software\\Suma\\suma chidara_Data scientist.docx.pdf",
+  name:            process.env.APPLICANT_NAME            || "Jane Doe",
+  firstName:       (process.env.APPLICANT_NAME || "Jane Doe").split(" ")[0],
+  lastName:        (process.env.APPLICANT_NAME || "Jane Doe").split(" ").slice(1).join(" "),
+  email:           process.env.EMAIL_USER                || "you@example.com",
+  phone:           process.env.APPLICANT_PHONE           || "",
+  location:        process.env.APPLICANT_LOCATION        || "",
+  linkedinUrl:     process.env.APPLICANT_LINKEDIN_URL    || "",
+  website:         process.env.APPLICANT_WEBSITE         || "",
+  yearsExperience: parseInt(process.env.APPLICANT_YEARS_EXPERIENCE || "5", 10),
+  expectedSalary:  process.env.APPLICANT_EXPECTED_SALARY || "",
+  skills:          (process.env.APPLICANT_SKILLS || "Python,SQL,Machine Learning").split(",").map(s => s.trim()),
+  summary:         process.env.APPLICANT_SUMMARY         || "Experienced professional seeking new opportunities.",
+  resumePath:      process.env.RESUME_PATH               || "",
 };
 
 const mockJob = {

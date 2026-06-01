@@ -900,8 +900,7 @@ async function runCycle() {
 
 // ─── Daily Digest Email ──────────────────────────────────────────────────────
 async function sendDailyDigest() {
-  // Always send to chidarasuma0209@gmail.com regardless of settings
-  const notifyTo = "chidarasuma0209@gmail.com";
+  const notifyTo = settings.notifyEmail || settings.emailUser;
 
   // Send ALL found jobs, sorted by score descending
   const allJobs = [...foundJobs].sort((a, b) => (b.score || 0) - (a.score || 0));
@@ -1452,7 +1451,7 @@ app.post("/api/score-job", (req, res) => {
 // No external API calls — pure SVG+Sharp pipeline
 app.get("/api/viral-image", async (req, res) => {
   try {
-    const { png, stats } = await generateViralImage();
+    const { png, stats } = await generateViralImage(null, settings.profile);
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Content-Disposition", "inline; filename=\"job-bot-viral.png\"");
     res.setHeader("Cache-Control", "no-cache");

@@ -2,7 +2,7 @@ import { scrapeTickBig } from "../tickbigScraper.js";
 
 console.log("Scraping TickBig jobs via Playwright…\n");
 try {
-  const jobs = await scrapeTickBig("chidarasuma0209@gmail.com", "&tSbbYP+XFF3_U9", "", "", 1);
+  const jobs = await scrapeTickBig(process.env.TICKBIG_EMAIL, process.env.TICKBIG_PASSWORD, "", "", 1);
   console.log(`Found ${jobs.length} total jobs\n`);
   jobs.slice(0, 8).forEach((j, i) => {
     console.log(`[${i+1}] ${j.title}`);

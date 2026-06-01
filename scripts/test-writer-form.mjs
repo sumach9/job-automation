@@ -25,26 +25,33 @@ const writerFormFields = [
   { id:"vet_status",    name:"vet_status",      type:"radio",    placeholder:"",       label:"Veteran Status",                                              ariaLabel:"", key:"vet_status", options:[{value:"protected",text:"I identify as one or more of the classifications of protected veteran listed above"},{value:"not_protected",text:"I am not a protected veteran"},{value:"decline",text:"I decline to self-identify for protected veteran status"}] },
 ];
 
+// Profile values read from .env — no personal data hardcoded in source
+const _name = process.env.APPLICANT_NAME || "Jane Doe";
 const profile = {
-  name: "Suma Chidara", firstName: "Suma", lastName: "Chidara",
-  email: "chidarasuma0209@gmail.com", phone: "8017840516",
-  location: "Seattle, WA",
-  linkedinUrl: "https://www.linkedin.com/in/suma-chidara/",
-  website: "https://github.com/sumachidara",
-  yearsExperience: 5,
-  skills: ["Python", "SQL", "Machine Learning", "Data Science", "Tableau", "AWS", "R", "Spark"],
-  summary: "Data scientist with 5+ years building ML models and analytics pipelines. Passionate about AI-driven products that create real user value.",
-  experiences: [{ title: "Data Scientist", company: "Accenture", duration: "2021-2024" }],
-  resumePath: "C:\\Users\\polak\\software\\Suma\\suma chidara_Data scientist.docx.pdf",
-  // New profile fields
+  name: _name,
+  firstName: _name.split(" ")[0],
+  lastName:  _name.split(" ").slice(1).join(" "),
+  email:     process.env.EMAIL_USER             || "you@example.com",
+  phone:     process.env.APPLICANT_PHONE        || "",
+  location:  process.env.APPLICANT_LOCATION     || "",
+  linkedinUrl: process.env.APPLICANT_LINKEDIN_URL || "",
+  website:   process.env.APPLICANT_WEBSITE      || "",
+  yearsExperience: parseInt(process.env.APPLICANT_YEARS_EXPERIENCE || "5", 10),
+  skills: (process.env.APPLICANT_SKILLS || "Python,SQL,Machine Learning,Data Science,Tableau,AWS,R,Spark").split(",").map(s => s.trim()),
+  summary: process.env.APPLICANT_SUMMARY || "Experienced data scientist with 5+ years building ML models and analytics pipelines.",
+  experiences: [],
+  resumePath: process.env.RESUME_PATH || "",
+  // Work auth & office
   isOver18: true, workAuthorized: true, requiresSponsorship: false,
-  willingToRelocate: true, preferredOfficeHub: "Seattle, Washington", inPersonOk: true,
+  willingToRelocate: true, preferredOfficeHub: process.env.APPLICANT_LOCATION || "Seattle, Washington", inPersonOk: true,
+  // EEO
   gender: "Decline to self-identify",
   race: "Decline to self-identify",
   veteranStatus: "I am not a protected veteran",
+  // Skill questions
   pythonYears: "5 - 7 years", codingPercentage: "75%",
-  whyJoinAnswer: "I'm excited about WRITER's mission to make AI writing reliable and trustworthy for enterprises.",
-  culturalValuesAnswer: "At Accenture, I owned end-to-end delivery of a churn prediction model that reduced customer loss by 18% — presenting findings directly to C-suite.",
+  whyJoinAnswer: "",
+  culturalValuesAnswer: "",
 };
 
 const job = { title: "Senior Data Scientist", company: "WRITER" };

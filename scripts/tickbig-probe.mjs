@@ -1,11 +1,12 @@
-// ─── TickBig Apply Flow Probe ────────────────────────────────────────────────
+﻿// â”€â”€â”€ TickBig Apply Flow Probe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Logs in, navigates to /jobs, clicks Apply on the first job card, and
 // captures ALL network + WebSocket traffic to understand the apply mechanism.
 
 import { chromium } from "playwright";
 
-const EMAIL    = "chidarasuma0209@gmail.com";
-const PASSWORD = "&tSbbYP+XFF3_U9";
+import dotenv from "dotenv"; dotenv.config();
+const EMAIL    = process.env.TICKBIG_EMAIL;
+const PASSWORD = process.env.TICKBIG_PASSWORD;
 
 (async () => {
   const browser = await chromium.launch({
@@ -18,7 +19,7 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   });
 
-  // ── Capture all network requests ──────────────────────────────────────────
+  // â”€â”€ Capture all network requests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const networkLog = [];
   context.on("request", req => {
     networkLog.push({ type: "request", method: req.method(), url: req.url(), time: Date.now() });
@@ -29,7 +30,7 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
 
   const page = await context.newPage();
 
-  // ── Intercept WebSocket frames via CDP ────────────────────────────────────
+  // â”€â”€ Intercept WebSocket frames via CDP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const wsMessages = [];
   const cdp = await context.newCDPSession(page);
   await cdp.send("Network.enable");
@@ -41,11 +42,11 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     wsMessages.push({ dir: "RECV", ts: timestamp, payload: response.payloadData });
   });
   cdp.on("Network.webSocketCreated", ({ requestId, url }) => {
-    console.log(`\n🔌 WebSocket opened: ${url}`);
+    console.log(`\nðŸ”Œ WebSocket opened: ${url}`);
   });
 
-  // ── Step 1: Login ──────────────────────────────────────────────────────────
-  console.log("→ Navigating to TickBig login…");
+  // â”€â”€ Step 1: Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  console.log("â†’ Navigating to TickBig loginâ€¦");
   await page.goto("https://www.tickbig.com/signin", { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForTimeout(2000);
 
@@ -65,18 +66,18 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
   const loginBtn = await page.locator("button.animeBtn, button[type='submit'], button:has-text('Sign'), button:has-text('Login')").first();
   await loginBtn.click();
 
-  console.log("→ Waiting for redirect after login…");
+  console.log("â†’ Waiting for redirect after loginâ€¦");
   try {
     await page.waitForURL("**/home**", { timeout: 20_000 });
-    console.log("✓ Logged in — on /home");
+    console.log("âœ“ Logged in â€” on /home");
   } catch {
-    console.log("⚠ No /home redirect, current URL:", page.url());
+    console.log("âš  No /home redirect, current URL:", page.url());
   }
   await page.waitForTimeout(2000);
   await page.screenshot({ path: "scripts/tb-03-after-login.png" });
 
-  // ── Step 2: Go to Jobs ────────────────────────────────────────────────────
-  console.log("→ Navigating to /jobs…");
+  // â”€â”€ Step 2: Go to Jobs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  console.log("â†’ Navigating to /jobsâ€¦");
   await page.goto("https://www.tickbig.com/jobs", { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForTimeout(3000);
   await page.screenshot({ path: "scripts/tb-04-jobs.png" });
@@ -86,12 +87,12 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     .allInnerTexts().catch(() => []);
   console.log("Job titles found:", jobTitles.slice(0, 5));
 
-  // ── Step 3: Clear network log, then click Apply ───────────────────────────
+  // â”€â”€ Step 3: Clear network log, then click Apply â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   networkLog.length = 0;
   wsMessages.length = 0;
   const snapBefore = Date.now();
 
-  console.log("→ Looking for Apply button…");
+  console.log("â†’ Looking for Apply buttonâ€¦");
   const applyBtn = await page.locator("button.jpfiCard__six-btn-1, button:has-text('Apply'), a:has-text('Apply')").first();
   const btnText = await applyBtn.innerText().catch(() => "?");
   console.log(`  Found button: "${btnText.trim()}"`);
@@ -120,13 +121,13 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     Object.assign(window.WebSocket, origWS);
   });
 
-  console.log("→ Clicking Apply…");
+  console.log("â†’ Clicking Applyâ€¦");
   await applyBtn.click();
   await page.waitForTimeout(4000);   // wait for any modal / redirect / WS message
 
   await page.screenshot({ path: "scripts/tb-06-after-apply.png" });
 
-  // ── Step 4: Capture console logs ──────────────────────────────────────────
+  // â”€â”€ Step 4: Capture console logs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const consoleLogs = [];
   page.on("console", msg => consoleLogs.push(`[${msg.type()}] ${msg.text()}`));
 
@@ -136,38 +137,38 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
   // Read WS messages injected via page script
   const pageWS = await page.evaluate(() => window.__wsCapture || []).catch(() => []);
 
-  // ── Step 5: Report ────────────────────────────────────────────────────────
-  console.log("\n════════════════════════════════════════════════════════════");
+  // â”€â”€ Step 5: Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  NETWORK REQUESTS after Apply click:");
-  console.log("════════════════════════════════════════════════════════════");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   const relevant = networkLog.filter(r => r.time > snapBefore);
   if (relevant.length === 0) {
-    console.log("  (none — no HTTP requests fired)");
+    console.log("  (none â€” no HTTP requests fired)");
   } else {
     relevant.forEach(r => console.log(` ${r.type.toUpperCase()} [${r.status||r.method}] ${r.url}`));
   }
 
-  console.log("\n════════════════════════════════════════════════════════════");
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  WEBSOCKET FRAMES (CDP) after Apply click:");
-  console.log("════════════════════════════════════════════════════════════");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   if (wsMessages.length === 0) {
     console.log("  (none captured via CDP)");
   } else {
     wsMessages.forEach(m => console.log(` [${m.dir}] ${m.payload}`));
   }
 
-  console.log("\n════════════════════════════════════════════════════════════");
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  WEBSOCKET FRAMES (page intercept) after Apply click:");
-  console.log("════════════════════════════════════════════════════════════");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   if (pageWS.length === 0) {
-    console.log("  (none — WS either not yet open or messages pre-date inject)");
+    console.log("  (none â€” WS either not yet open or messages pre-date inject)");
   } else {
     pageWS.forEach(m => console.log(` [${m.dir}] ${m.data}`));
   }
 
   // Check for Razorpay / payment modal
   const razorpayVisible = await page.locator("#razorpay-backdrop, iframe[src*='razorpay'], .razorpay-container").isVisible({ timeout: 2000 }).catch(() => false);
-  console.log("\n════════════════════════════════════════════════════════════");
+  console.log("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
   console.log("  RAZORPAY MODAL VISIBLE:", razorpayVisible);
 
   // Check current URL
@@ -179,10 +180,11 @@ const PASSWORD = "&tSbbYP+XFF3_U9";
     console.log("\n  MODAL TEXT:\n", modalText.slice(0, 500));
   }
 
-  console.log("════════════════════════════════════════════════════════════\n");
+  console.log("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\n");
   console.log("Screenshots saved to scripts/tb-0*.png");
-  console.log("Keeping browser open for 15s for manual inspection…");
+  console.log("Keeping browser open for 15s for manual inspectionâ€¦");
 
   await page.waitForTimeout(15_000);
   await browser.close();
 })();
+
