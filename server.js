@@ -180,6 +180,8 @@ const settings = {
   notifyEmail: process.env.NOTIFY_EMAIL || "",
   linkedinEmail: process.env.LINKEDIN_EMAIL || "",
   linkedinPassword: process.env.LINKEDIN_PASSWORD || "",
+  indeedEmail: process.env.INDEED_EMAIL || process.env.LINKEDIN_EMAIL || "",
+  indeedPassword: process.env.INDEED_PASSWORD || process.env.LINKEDIN_PASSWORD || "",
   simplifyMode: process.env.SIMPLIFY_MODE || "shell",
   simplifyAutoSubmit: process.env.SIMPLIFY_AUTO_SUBMIT === "true",
   // Applicant profile â€” loaded from data.json, falls back to env vars
@@ -691,8 +693,8 @@ async function applyToJob(job, { maxBrowserOpens = 5 } = {}) {
           credentials: {
             linkedinEmail:    settings.linkedinEmail,
             linkedinPassword: settings.linkedinPassword,
-            indeedEmail:      settings.linkedinEmail,
-            indeedPassword:   settings.linkedinPassword,
+            indeedEmail:      settings.indeedEmail,
+            indeedPassword:   settings.indeedPassword,
           },
           profile:    settings.profile,
           resumePath: settings.profile.resumePath,

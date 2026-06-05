@@ -37,11 +37,13 @@ async function getBrowser() {
 // ─── Detect platform from URL ─────────────────────────────────────────────────
 export function detectPlatform(url = "") {
   if (!url) return "unknown";
-  if (url.includes("linkedin.com"))    return "linkedin";
-  if (url.includes("indeed.com"))      return "indeed";
-  if (url.includes("glassdoor.com"))   return "glassdoor";
-  if (url.includes("ziprecruiter.com"))return "ziprecruiter";
-  if (url.includes("dice.com"))        return "dice";
+  if (url.includes("linkedin.com"))         return "linkedin";
+  if (url.includes("indeed.com"))           return "indeed";
+  if (url.includes("glassdoor.com"))        return "glassdoor";
+  if (url.includes("ziprecruiter.com"))     return "ziprecruiter";
+  if (url.includes("dice.com"))             return "dice";
+  if (url.includes("myworkdayjobs.com") ||
+      url.includes("workday.com"))          return "workday";
   return "other";
 }
 
@@ -78,7 +80,12 @@ export async function smartApply({ job, credentials, profile, resumePath }) {
     return { success: false, reason: `${platform} listing — opened in Chrome for manual apply`, browserOpened: true, autoApplied: false };
   }
 
-  // Greenhouse, Lever, Ashby, Workday, company sites — AI fills the form directly
+  // Workday — dedicated filler with Workday-specific selectors
+  if (platform === "workday") {
+    return applyWorkday({ jobUrl: applyUrl, profile, resumePath });
+  }
+
+  // Greenhouse, Lever, Ashby, company sites — AI fills the form directly
   return openWithSimplify(applyUrl, job, profile);
 }
 
@@ -370,7 +377,6 @@ export async function applyIndeed({ jobUrl, credentials, profile, resumePath }) 
     context = await ensureIndeedLogin(credentials);
     page = await context.newPage();
   } catch (err) {
-    // Playwright failed to launch — fall back to opening in Chrome
     _browser = null; _indeedContext = null;
     try { await execAsync(`start "" "${jobUrl}"`); } catch {}
     return { success: false, reason: `Playwright error, opened in Chrome: ${err.message}`, browserOpened: true, autoApplied: false };
@@ -381,63 +387,253 @@ export async function applyIndeed({ jobUrl, credentials, profile, resumePath }) 
     await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await delay(2000, 500);
 
-    // Click Apply / Apply Now button
-    const applyBtn = page.locator(
-      "button:has-text('Apply now'), button:has-text('Apply'), a:has-text('Apply now')"
+    // ── Detect Easy Apply vs external apply ──────────────────────────────────
+    const easyApplyBtn = page.locator(
+      "button:has-text('Apply now'), button[data-indeed-apply-jobid], " +
+      ".ia-IndeedApplyButton, button:has-text('Easily apply')"
     ).first();
-    if (!await isVisible(applyBtn)) {
-      return { ...result, reason: "No Apply button found on Indeed job" };
-    }
-    await applyBtn.click();
-    await delay(2000, 500);
 
-    // Handle multi-step Indeed form
-    for (let step = 0; step < 10; step++) {
+    if (!await isVisible(easyApplyBtn)) {
+      // No Easy Apply — open in Chrome for manual apply
+      try { await execAsync(`start "" "${jobUrl}"`); } catch {}
+      await page.close().catch(() => {});
+      return { success: false, reason: "No Indeed Easy Apply — opened in Chrome", browserOpened: true, autoApplied: false };
+    }
+
+    await easyApplyBtn.click();
+    await delay(2500, 500);
+
+    let filledTotal = 0;
+
+    // ── Multi-step Indeed form loop ───────────────────────────────────────────
+    for (let step = 0; step < 12; step++) {
       await delay(1000, 400);
 
-      // Upload resume
+      // Resume upload
       if (resumePath && fs.existsSync(resumePath)) {
         const fileInput = page.locator("input[type='file']").first();
-        if (await isVisible(fileInput)) {
+        if (await fileInput.isVisible().catch(() => false)) {
           await fileInput.setInputFiles(resumePath);
           await delay(3000, 500);
+          filledTotal++;
         }
       }
 
-      // Fill text inputs
-      for (const input of await page.locator("input[type='text']:visible, input[type='tel']:visible").all()) {
-        const val = await input.inputValue().catch(() => "");
-        if (val) continue;
-        const label = await labelFor(input);
-        if (label.includes("phone")) await input.fill(profile.phone || "");
-        else if (label.includes("city") || label.includes("location")) await input.fill(profile.location || "Seattle, WA");
-        else if (label.includes("name")) await input.fill(profile.name || "");
+      // AI mapper first
+      try {
+        const formFields = await extractFormFields(page);
+        if (formFields.length > 0) {
+          const mapping = await aiMapFields(formFields, profile || {}, {});
+          if (Object.keys(mapping).length > 0) {
+            const { filled } = await applyFieldMapping(page, mapping, profile || {}, formFields);
+            filledTotal += filled;
+          }
+        }
+      } catch {}
+
+      // Indeed-specific fallbacks
+      const p = profile || {};
+      const indeedFill = async (sel, value) => {
+        if (!value) return;
+        const el = page.locator(sel).first();
+        if (await isVisible(el) && !(await el.inputValue().catch(() => ""))) {
+          await el.fill(value); filledTotal++;
+        }
+      };
+      await indeedFill("input[name='applicant.name'], input[aria-label*='name' i]", p.name || "");
+      await indeedFill("input[name='applicant.phoneNumber'], input[aria-label*='phone' i]", p.phone || "");
+      await indeedFill("input[name='applicant.city'], input[aria-label*='city' i]", (p.location || "").split(",")[0]?.trim() || "");
+
+      // Work auth — select "Yes" on dropdowns
+      for (const sel of await page.locator("select").all()) {
+        const opts = await sel.locator("option").allInnerTexts().catch(() => []);
+        const yesIdx = opts.findIndex(o => /yes|authorized|eligible/i.test(o));
+        if (yesIdx > 0) { await sel.selectOption({ index: yesIdx }); filledTotal++; }
       }
 
-      // Yes/No — default Yes for authorization questions
+      // Radios — "Yes" for auth, "No" for sponsorship
       for (const radio of await page.locator("label:has-text('Yes') input[type='radio']").all()) {
         if (await isVisible(radio)) await radio.check().catch(() => {});
       }
 
+      await delay(600, 200);
+
       // Submit
-      const submitBtn = page.locator("button:has-text('Submit'), button[type='submit']:has-text('Submit')").first();
+      const submitBtn = page.locator(
+        "button:has-text('Submit your application'), button:has-text('Submit application'), " +
+        "button[data-testid='IndeedApply-bottomButton']:has-text('Submit')"
+      ).first();
       if (await isVisible(submitBtn)) {
+        await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
         await submitBtn.click();
-        await delay(2000, 300);
-        return { success: true, reason: "Submitted via Indeed", autoApplied: true };
+        await delay(2500, 300);
+        return { success: true, reason: `Indeed Easy Apply submitted (${filledTotal} fields)`, autoApplied: true };
       }
 
       // Continue / Next
-      const nextBtn = page.locator("button:has-text('Continue'), button:has-text('Next')").first();
+      const nextBtn = page.locator(
+        "button:has-text('Continue'), button:has-text('Next'), " +
+        "button[data-testid='IndeedApply-bottomButton']"
+      ).first();
       if (await isVisible(nextBtn)) {
         await nextBtn.click();
+        await delay(1500, 400);
       } else break;
     }
-    return { ...result, reason: "Could not complete Indeed form" };
+    return { ...result, reason: `Indeed: could not complete form (${filledTotal} fields filled)` };
   } catch (err) {
     return { ...result, reason: err.message };
   } finally {
     await page.close().catch(() => {});
+  }
+}
+
+// ─── Workday Auto-Fill ────────────────────────────────────────────────────────
+// Handles *.myworkdayjobs.com and *.workday.com apply pages
+async function applyWorkday({ jobUrl, profile, resumePath }) {
+  const result = { success: false, reason: "", autoApplied: false };
+  let page = null;
+  try {
+    const browser = await getBrowser();
+    const ctx = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    });
+    page = await ctx.newPage();
+    await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 40_000 });
+    await delay(3000, 500);
+
+    // ── Click "Apply" if on job description page ──────────────────────────────
+    const applyBtns = [
+      "[data-automation-id='applyButton']",
+      "a:has-text('Apply')", "button:has-text('Apply')",
+    ];
+    for (const sel of applyBtns) {
+      const btn = page.locator(sel).first();
+      if (await isVisible(btn)) { await btn.click(); await delay(2500, 500); break; }
+    }
+
+    const p = profile || {};
+    const firstName = p.firstName || (p.name || "").split(" ")[0] || "";
+    const lastName  = p.lastName  || (p.name || "").split(" ").slice(1).join(" ") || "";
+    let filledTotal = 0;
+
+    // ── Multi-step Workday form loop ──────────────────────────────────────────
+    for (let step = 0; step < 15; step++) {
+      await delay(1500, 400);
+
+      // ── Resume upload ────────────────────────────────────────────────────
+      if (resumePath && fs.existsSync(resumePath)) {
+        const fileInput = page.locator(
+          "[data-automation-id='file-upload-input-ref'], input[type='file']"
+        ).first();
+        if (await fileInput.isVisible().catch(() => false)) {
+          await fileInput.setInputFiles(resumePath);
+          await delay(3000, 500);
+          filledTotal++;
+        }
+      }
+
+      // ── AI mapper for this step ───────────────────────────────────────────
+      try {
+        const formFields = await extractFormFields(page);
+        if (formFields.length > 0) {
+          const mapping = await aiMapFields(formFields, p, {});
+          if (Object.keys(mapping).length > 0) {
+            const { filled } = await applyFieldMapping(page, mapping, p, formFields);
+            filledTotal += filled;
+          }
+        }
+      } catch {}
+
+      // ── Workday-specific field fallbacks (data-automation-id) ─────────────
+      const wdFill = async (automationId, value) => {
+        if (!value) return;
+        const el = page.locator(`[data-automation-id="${automationId}"]`).first();
+        if (await isVisible(el)) { await el.fill(value); filledTotal++; }
+      };
+
+      await wdFill("legalNameSection_firstName",  firstName);
+      await wdFill("legalNameSection_lastName",   lastName);
+      await wdFill("email",                       p.email || "");
+      await wdFill("phone",                       p.phone || "");
+      await wdFill("addressSection_city",         (p.location || "").split(",")[0]?.trim() || "");
+      await wdFill("addressSection_postalCode",   p.zipCode || "");
+      await wdFill("LinkedIn_URL",                p.linkedinUrl || "");
+
+      // Work authorization — select "Yes, I am authorized"
+      const authSel = page.locator(
+        "[data-automation-id='workAuthorization'] select, [data-automation-id='authorizedToWork'] select"
+      ).first();
+      if (await isVisible(authSel)) {
+        await authSel.selectOption({ index: 1 });
+        filledTotal++;
+      }
+
+      // Sponsor radio — "No" to avoid auto-rejection
+      const noSponsorRadios = await page.locator(
+        "[data-automation-id*='sponsor'] label:has-text('No') input[type='radio']," +
+        "[data-automation-id*='Sponsor'] label:has-text('No') input[type='radio']"
+      ).all();
+      for (const r of noSponsorRadios) {
+        if (await isVisible(r)) { await r.check().catch(() => {}); filledTotal++; }
+      }
+
+      await delay(600, 200);
+
+      // ── Submit ───────────────────────────────────────────────────────────
+      const submitSels = [
+        "[data-automation-id='bottom-navigation-next-button']",
+        "[data-automation-id='submitButton']",
+        "button:has-text('Submit')",
+        "button[type='submit']:visible",
+      ];
+      let submitted = false;
+      for (const sel of submitSels) {
+        const btn = page.locator(sel).first();
+        if (await isVisible(btn)) {
+          const txt = (await btn.innerText().catch(() => "")).toLowerCase();
+          if (txt.includes("submit")) {
+            await btn.scrollIntoViewIfNeeded().catch(() => {});
+            await btn.click();
+            await delay(3000, 400);
+            await page.close().catch(() => {});
+            return { success: true, reason: `Workday: submitted (${filledTotal} fields)`, autoApplied: true };
+          }
+        }
+      }
+
+      // ── Next / Continue ───────────────────────────────────────────────────
+      const nextSels = [
+        "[data-automation-id='bottom-navigation-next-button']",
+        "button:has-text('Next')", "button:has-text('Continue')",
+        "button:has-text('Save and Continue')",
+      ];
+      let movedNext = false;
+      for (const sel of nextSels) {
+        const btn = page.locator(sel).first();
+        if (await isVisible(btn)) {
+          await btn.scrollIntoViewIfNeeded().catch(() => {});
+          await btn.click();
+          await delay(2000, 400);
+          movedNext = true;
+          break;
+        }
+      }
+      if (!movedNext) break;
+    }
+
+    await page.close().catch(() => {});
+    return {
+      success: false,
+      reason: filledTotal > 0
+        ? `Workday: filled ${filledTotal} fields but no Submit button reached`
+        : "Workday: no fields found — may require account creation",
+      autoApplied: false,
+    };
+  } catch (err) {
+    if (page) await page.close().catch(() => {});
+    return { success: false, reason: `Workday error: ${err.message}`, autoApplied: false };
   }
 }
 
