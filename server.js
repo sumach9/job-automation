@@ -312,8 +312,7 @@ async function scrapeLinkedIn(title, location) {
         engine:   "google_jobs",
         q:        `${title} site:linkedin.com/jobs`,
         location,
-        chips:    getDateFilter().chip,
-        hl:       "en",
+        // NOTE: chips/date_posted conflicts with site: queries -- omitted`n        hl:       "en",
         api_key:  settings.serpApiKey,
       },
       timeout: 30_000,
@@ -357,7 +356,7 @@ async function scrapeIndeed(title, location) {
         engine:   "google_jobs",
         q:        `${title} site:indeed.com`,
         location,
-        chips:    getDateFilter().chip,
+        // NOTE: chips/date_posted conflicts with site: queries -- date filter applied via Google Jobs scraper only
         hl:       "en",
         api_key:  settings.serpApiKey,
       },
@@ -399,7 +398,7 @@ async function scrapeGlassdoor(title, location) {
         engine:  "google_jobs",
         q:       `${title} site:glassdoor.com`,
         location,
-        chips:    getDateFilter().chip,
+        // NOTE: chips/date_posted conflicts with site: queries -- date filter applied via Google Jobs scraper only
         hl:      "en",
         api_key: settings.serpApiKey,
       },
@@ -439,7 +438,7 @@ async function scrapeZipRecruiter(title, location) {
         engine:  "google_jobs",
         q:       `${title} site:ziprecruiter.com`,
         location,
-        chips:    getDateFilter().chip,
+        // NOTE: chips/date_posted conflicts with site: queries -- date filter applied via Google Jobs scraper only
         hl:      "en",
         api_key: settings.serpApiKey,
       },
@@ -818,7 +817,7 @@ async function runCycle() {
   log("info", "Automation cycle started");
   let newThisCycle = 0;
   browserOpensThisCycle = 0;  // reset browser-open counter each cycle
-  const maxBrowserOpens = settings.maxBrowserOpensPerCycle ?? 5;
+  const maxBrowserOpens = settings.maxBrowserOpensPerCycle ?? 20;
 
   // â”€â”€ 1. Apify + SerpAPI scrapers (per title/location) â”€â”€
   for (const title of settings.jobTitles) {

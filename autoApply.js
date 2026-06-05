@@ -69,10 +69,13 @@ export async function smartApply({ job, credentials, profile, resumePath }) {
     return applyIndeed({ jobUrl: applyUrl, credentials, profile, resumePath });
   }
 
-  // Glassdoor / ZipRecruiter / direct company ATS pages — use AI form filler
+  // Glassdoor / ZipRecruiter — listing pages with external apply links: open in Chrome
   if (platform === "glassdoor" || platform === "ziprecruiter") {
-    // These are listing pages, not apply forms — skip to avoid useless tab opens
-    return { success: false, reason: `${platform} listing page — not a direct apply form`, autoApplied: false };
+    try {
+      if (process.platform === "win32") await execAsync(`start "" "${applyUrl}"`);
+      else await execAsync(`open "${applyUrl}"`);
+    } catch {}
+    return { success: false, reason: `${platform} listing — opened in Chrome for manual apply`, browserOpened: true, autoApplied: false };
   }
 
   // Greenhouse, Lever, Ashby, Workday, company sites — AI fills the form directly
