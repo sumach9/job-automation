@@ -580,11 +580,67 @@ const IRRELEVANT_KEYWORDS = [
   "controls engineer", "construction", "manufacturing",
 ];
 
+// Map user-configured location names to US state abbreviations
+const LOCATION_STATE_MAP = {
+  "seattle":          ["wa"],
+  "washington":       ["wa"],
+  "washington state": ["wa"],
+  "spokane":          ["wa"],
+  "tacoma":           ["wa"],
+  "bellevue":         ["wa"],
+  "redmond":          ["wa"],
+  "oregon":           ["or"],
+  "portland":         ["or"],
+  "california":       ["ca"],
+  "san francisco":    ["ca"],
+  "los angeles":      ["ca"],
+  "new york":         ["ny", "nj"],
+  "texas":            ["tx"],
+  "remote":           [],   // remote jobs allowed from anywhere
+};
+
+function isLocationMatch(jobLocation, configuredLocations) {
+  if (!jobLocation) return true; // no location data — allow it
+  const jl = jobLocation.toLowerCase();
+
+  // Always allow remote jobs
+  if (/remote|anywhere|work from home|wfh/i.test(jl)) return true;
+
+  // Build the set of allowed state codes from user's configured locations
+  const allowedStates = new Set();
+  for (const loc of configuredLocations) {
+    const key = loc.trim().toLowerCase();
+    const states = LOCATION_STATE_MAP[key];
+    if (states) states.forEach(s => allowedStates.add(s));
+    else allowedStates.add(key.slice(0, 2)); // fallback: use first 2 chars as state code
+  }
+
+  if (allowedStates.size === 0) return true; // no state mapping — allow all
+
+  // Check if job location contains any of the allowed states
+  for (const state of allowedStates) {
+    // Match ", WA" or "(WA)" or "WA " patterns
+    if (new RegExp(`(^|[\\s,\\(])${state}([\\s,\\)\\.]|$)`, "i").test(jl)) return true;
+  }
+
+  // Also match if job location directly contains a configured city/state name
+  for (const loc of configuredLocations) {
+    if (jl.includes(loc.trim().toLowerCase())) return true;
+  }
+
+  return false;
+}
+
 function isRelevant(job) {
   const text = `${job.title} ${job.description || ""}`.toLowerCase();
   const hasRelevant = RELEVANT_KEYWORDS.some((kw) => text.includes(kw));
   const hasIrrelevant = IRRELEVANT_KEYWORDS.some((kw) => text.includes(kw));
-  return hasRelevant && !hasIrrelevant;
+  if (!hasRelevant || hasIrrelevant) return false;
+
+  // Location filter — drop jobs from states not in the user's configured locations
+  if (!isLocationMatch(job.location, settings.locations || [])) return false;
+
+  return true;
 }
 
 // â”€â”€â”€ Multi-platform scrape â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -592,14 +648,16 @@ function isRelevant(job) {
 const seenUrls = new Set(foundJobs.map((j) => j.url).filter(Boolean));
 
 async function scrapeAllPlatforms(title, location) {
+  // Disambiguate "Washington" -> "Washington State" so SerpAPI doesn't return DC/VA/MD jobs
+  const searchLoc = /^washington$/i.test((location || "").trim()) ? "Washington State" : location;
   const promises = [];
   // All platform scrapers now use SerpAPI (no Apify required)
   if (settings.serpApiKey) {
-    if (settings.platforms.linkedin     !== false) promises.push(scrapeLinkedIn(title, location));
-    if (settings.platforms.indeed       !== false) promises.push(scrapeIndeed(title, location));
-    if (settings.platforms.glassdoor    !== false) promises.push(scrapeGlassdoor(title, location));
-    if (settings.platforms.ziprecruiter !== false) promises.push(scrapeZipRecruiter(title, location));
-    if (settings.platforms.googlejobs   !== false) promises.push(scrapeGoogleJobs(title, location));
+    if (settings.platforms.linkedin     !== false) promises.push(scrapeLinkedIn(title, searchLoc));
+    if (settings.platforms.indeed       !== false) promises.push(scrapeIndeed(title, searchLoc));
+    if (settings.platforms.glassdoor    !== false) promises.push(scrapeGlassdoor(title, searchLoc));
+    if (settings.platforms.ziprecruiter !== false) promises.push(scrapeZipRecruiter(title, searchLoc));
+    if (settings.platforms.googlejobs   !== false) promises.push(scrapeGoogleJobs(title, searchLoc));
   } else if (settings.platforms.googlejobs !== false) {
     // No SerpAPI key at all â€” skip
     log("warning", "No SerpAPI key configured â€” job search disabled. Add SERPAPI_KEY to .env");
@@ -607,7 +665,7 @@ async function scrapeAllPlatforms(title, location) {
 
   // TickBig runs independently of SerpAPI (uses its own REST API)
   if (settings.platforms.tickbig !== false && settings.tickbigEmail) {
-    promises.push(scrapeTickBigJobs(title, location));
+    promises.push(scrapeTickBigJobs(title, searchLoc));
   }
 
   const results = await Promise.allSettled(promises);
