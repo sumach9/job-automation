@@ -297,9 +297,15 @@ function JobDetailPanel({ job, onApply, onClose }) {
         {activeTab==="overview" && <>
           {job.scoreBreakdown && (
             <div style={{ background:"#fafaf9", borderRadius:10, padding:"14px 16px", border:"1px solid #e5e3e0", marginBottom:16 }}>
-              <div style={{ fontSize:11, color:"#a8a29e", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>Fit Breakdown</div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
-                {[["Title",job.scoreBreakdown.title,"/2"],["Skills",job.scoreBreakdown.skills?.toFixed(1),"/2"],["Location",job.scoreBreakdown.location,"/1"],["Exp",job.scoreBreakdown.experienceBonus?.toFixed(1),"+"]].map(([k,v,max]) => (
+              <div style={{ fontSize:11, color:"#a8a29e", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>NLP Fit Breakdown</div>
+              {/* Score tiles */}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:10 }}>
+                {[
+                  ["Title",    job.scoreBreakdown.title,            "/2"],
+                  ["NLP Skills",job.scoreBreakdown.nlpSkills?.toFixed(1) ?? job.scoreBreakdown.skills?.toFixed(1), "/2"],
+                  ["Location", job.scoreBreakdown.location,         "/1"],
+                  ["Exp",      job.scoreBreakdown.experienceBonus?.toFixed(1), "+"],
+                ].map(([k,v,max]) => (
                   <div key={k} style={{ background:"#fff", borderRadius:8, padding:"10px 12px", textAlign:"center", border:"1px solid #f0eeec" }}>
                     <div style={{ fontSize:10, color:"#a8a29e", marginBottom:4 }}>{k}</div>
                     <div style={{ fontSize:18, fontWeight:700, color:scoreColor(job.score) }}>{v??"-"}</div>
@@ -307,6 +313,47 @@ function JobDetailPanel({ job, onApply, onClose }) {
                   </div>
                 ))}
               </div>
+              {/* NLP similarity meters */}
+              {(job.scoreBreakdown.jaccardPct || job.scoreBreakdown.cosinePct) && (
+                <div style={{ display:"flex", gap:12, marginBottom:10 }}>
+                  {[
+                    { label:"Skills Jaccard", val:job.scoreBreakdown.jaccardPct, tip:"Skill set overlap: matched ÷ union" },
+                    { label:"TF-Cosine",      val:job.scoreBreakdown.cosinePct,  tip:"Profile text similarity to job description" },
+                  ].map(({ label, val, tip }) => (
+                    <div key={label} style={{ flex:1, background:"#fff", borderRadius:8, padding:"8px 12px", border:"1px solid #f0eeec" }} title={tip}>
+                      <div style={{ fontSize:10, color:"#a8a29e", marginBottom:4 }}>{label}</div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <div style={{ flex:1, height:6, background:"#f0eeec", borderRadius:3, overflow:"hidden" }}>
+                          <div style={{ width: val, height:"100%", background: scoreColor(job.score), borderRadius:3, transition:"width .4s" }}/>
+                        </div>
+                        <span style={{ fontSize:12, fontWeight:700, color:scoreColor(job.score), minWidth:34 }}>{val}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Matched skills */}
+              {job.scoreBreakdown.matchedSkills?.length > 0 && (
+                <div style={{ marginBottom:6 }}>
+                  <div style={{ fontSize:10, color:"#16a34a", fontWeight:700, marginBottom:4 }}>✓ Matched Skills</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {job.scoreBreakdown.matchedSkills.map((s,i) => (
+                      <span key={i} style={{ background:"#dcfce7", color:"#16a34a", border:"1px solid #bbf7d0", borderRadius:4, padding:"2px 7px", fontSize:11 }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Missing skills */}
+              {job.scoreBreakdown.missingSkills?.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, color:"#dc2626", fontWeight:700, marginBottom:4 }}>✗ Not mentioned</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                    {job.scoreBreakdown.missingSkills.map((s,i) => (
+                      <span key={i} style={{ background:"#fee2e2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:4, padding:"2px 7px", fontSize:11 }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {job.skills?.length > 0 && (
