@@ -2008,7 +2008,7 @@ export default function App() {
                     <table style={{ width:"100%", borderCollapse:"collapse" }}>
                       <thead>
                         <tr style={{ background:"#fafaf9" }}>
-                          {["","Title","Company","Platform","Score","Status","Applied",""].map((h,i) => (
+                          {["","Title","Company","Platform","Score","Status","Applied","Apply",""].map((h,i) => (
                             <th key={i} style={{ padding:"10px 16px", textAlign:"left", fontSize:11, color:"#a8a29e", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.06em", borderBottom:"1px solid #f0eeec", whiteSpace:"nowrap" }}>{h}</th>
                           ))}
                         </tr>
@@ -2029,6 +2029,17 @@ export default function App() {
                             <td style={{ padding:"11px 16px" }}>{a.score!=null&&<ScoreBadge score={a.score} size="sm"/>}</td>
                             <td style={{ padding:"11px 16px" }}><StatusPill status={a.status}/></td>
                             <td style={{ padding:"11px 16px", fontSize:12, color:"#a8a29e", whiteSpace:"nowrap" }}>{a.postedAt?new Date(a.postedAt).toLocaleDateString():"—"}</td>
+                            <td style={{ padding:"11px 16px", whiteSpace:"nowrap" }}>
+                              {a.url
+                                ? <a href={a.url} target="_blank" rel="noreferrer"
+                                    style={{ background:"#1c1917", color:"#fff", borderRadius:6, padding:"4px 11px", fontSize:11, fontWeight:700, textDecoration:"none", display:"inline-block" }}
+                                    onMouseEnter={e=>e.currentTarget.style.background="#2563eb"}
+                                    onMouseLeave={e=>e.currentTarget.style.background="#1c1917"}>
+                                    Apply →
+                                  </a>
+                                : <span style={{ color:"#d6d3d1", fontSize:11 }}>no url</span>
+                              }
+                            </td>
                             <td style={{ padding:"11px 16px" }}>
                               <button onClick={()=>deleteApplication(a.id)} style={{ background:"none", border:"none", color:"#d6d3d1", cursor:"pointer", fontSize:14, borderRadius:4, padding:"2px 5px" }}
                                 onMouseEnter={e=>e.currentTarget.style.color="#dc2626"}
