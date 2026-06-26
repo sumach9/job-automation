@@ -90,27 +90,79 @@ export async function smartApply({ job, credentials, profile, resumePath }) {
 }
 
 // ─── LinkedIn Easy Apply ──────────────────────────────────────────────────────
+const LI_COOKIE_FILE = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")), "cookies", "linkedin-session.json");
+
+async function saveLinkedInCookies(ctx) {
+  try {
+    const cookies = await ctx.cookies("https://www.linkedin.com");
+    fs.mkdirSync(path.dirname(LI_COOKIE_FILE), { recursive: true });
+    fs.writeFileSync(LI_COOKIE_FILE, JSON.stringify(cookies));
+  } catch {}
+}
+
+async function loadLinkedInCookies(ctx) {
+  try {
+    if (!fs.existsSync(LI_COOKIE_FILE)) return false;
+    const cookies = JSON.parse(fs.readFileSync(LI_COOKIE_FILE, "utf8"));
+    // Treat cookies as expired if saved more than 12 hours ago
+    const mtime = fs.statSync(LI_COOKIE_FILE).mtimeMs;
+    if (Date.now() - mtime > 12 * 60 * 60 * 1000) return false;
+    await ctx.addCookies(cookies);
+    return true;
+  } catch { return false; }
+}
+
 async function ensureLinkedInLogin(credentials) {
   if (_linkedinContext) return _linkedinContext;
   const browser = await getBrowser();
   _linkedinContext = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    viewport: { width: 1366, height: 768 },
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    locale: "en-US",
+    timezoneId: "America/Los_Angeles",
+    // Override navigator properties to reduce bot detection
+    javaScriptEnabled: true,
   });
+
+  // Try restoring saved session first
+  const restored = await loadLinkedInCookies(_linkedinContext);
+  if (restored) {
+    const check = await _linkedinContext.newPage();
+    try {
+      await check.goto("https://www.linkedin.com/feed/", { waitUntil: "domcontentloaded", timeout: 15_000 });
+      const url = check.url();
+      await check.close();
+      if (url.includes("/feed")) return _linkedinContext; // session still valid
+    } catch {
+      await check.close().catch(() => {});
+    }
+    // Cookies stale — fall through to fresh login
+  }
+
+  // Fresh login
   const page = await _linkedinContext.newPage();
+  // Mask Playwright fingerprint
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    Object.defineProperty(navigator, "plugins", { get: () => [1,2,3] });
+  });
   await page.goto("https://www.linkedin.com/login", { waitUntil: "domcontentloaded" });
-  await delay(1000, 500);
+  await delay(1500, 500);
+
   await page.fill("#username", credentials.linkedinEmail);
-  await delay(300, 200);
+  await delay(400, 200);
   await page.fill("#password", credentials.linkedinPassword);
-  await delay(200, 300);
+  await delay(300, 200);
   await page.click('[data-litms-control-urn="login-submit"]');
+
   try {
-    await page.waitForURL("**/feed/**", { timeout: 20_000 });
+    await page.waitForURL("**/feed/**", { timeout: 25_000 });
   } catch {
-    // 2FA — give user 90s to complete
+    // 2FA or challenge — wait up to 90s for user to complete
     await page.waitForURL("**/feed/**", { timeout: 90_000 });
   }
+
+  await saveLinkedInCookies(_linkedinContext);
   await page.close();
   return _linkedinContext;
 }
@@ -130,27 +182,59 @@ export async function applyLinkedIn({ jobUrl, credentials, profile, resumePath }
 
   try {
     await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await delay(2000, 500);
+    await delay(2500, 500);
+
+    // Check if we landed on a login/auth page — session expired
+    const currentUrl = page.url();
+    if (currentUrl.includes("/login") || currentUrl.includes("/authwall") || currentUrl.includes("/checkpoint")) {
+      // Session expired — clear and open in Chrome instead
+      _linkedinContext = null;
+      try { await execAsync(`start "" "${jobUrl}"`); } catch {}
+      await page.close().catch(() => {});
+      return { ...result, reason: "LinkedIn session expired — opened in Chrome", browserOpened: true };
+    }
+
     const jobDetails = await scrapeJobDetails(page);
 
-    // ── Find Easy Apply button (updated 2024-2025 selectors) ────────────────
+    // Scroll down slightly to trigger lazy-loaded job panel / Easy Apply button
+    await page.evaluate(() => window.scrollBy(0, 250)).catch(() => {});
+    await delay(1200, 300);
+
+    // ── Find Easy Apply button (2025 selectors, multiple attempts) ──────────
     const easyApplySelectors = [
       "button[aria-label*='Easy Apply']",
+      "button[aria-label*='easy apply']",
       "button.jobs-apply-button",
       "button[class*='jobs-apply-button']",
-      ".jobs-apply-button--top-card",
+      ".jobs-apply-button--top-card button",
+      ".jobs-s-apply button",
       "button:has-text('Easy Apply')",
+      "[data-control-name='jobdetails_topcard_inapply']",
+      ".jobs-apply-button",
     ];
     let btn = null;
+
+    // First pass
     for (const sel of easyApplySelectors) {
       const el = page.locator(sel).first();
       if (await isVisible(el)) { btn = el; break; }
     }
+
+    // Second pass after extra scroll + wait (button sometimes loads after initial render)
+    if (!btn) {
+      await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+      await delay(1500, 300);
+      for (const sel of easyApplySelectors) {
+        const el = page.locator(sel).first();
+        if (await isVisible(el)) { btn = el; break; }
+      }
+    }
+
     if (!btn) {
       // Not an Easy Apply job — open in Chrome for manual apply
       try { await execAsync(`start "" "${jobUrl}"`); } catch {}
       await page.close().catch(() => {});
-      return { ...result, reason: "No Easy Apply — opened in Chrome for manual apply", browserOpened: true, jobDetails };
+      return { ...result, reason: "No Easy Apply button — opened in Chrome", browserOpened: true, jobDetails };
     }
 
     await btn.click();

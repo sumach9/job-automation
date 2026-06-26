@@ -167,7 +167,7 @@ const settings = {
   locations: (process.env.JOB_LOCATIONS || "Remote,United States").split(",").map((s) => s.trim()),
   intervalMinutes: parseInt(process.env.INTERVAL_MINUTES || "5", 10),
   maxApplicationsPerRun: parseInt(process.env.MAX_APPS_PER_RUN || "10", 10),
-  maxBrowserOpensPerCycle: parseInt(process.env.MAX_BROWSER_OPENS || "5", 10),
+  maxBrowserOpensPerCycle: parseInt(process.env.MAX_BROWSER_OPENS || "50", 10),
   datePostedFilter: process.env.DATE_POSTED_FILTER || "week", // "today" | "week" | "month"
   emailNotifications: process.env.EMAIL_NOTIFICATIONS === "true",
   platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true, tickbig: true },
@@ -975,6 +975,27 @@ async function runCycle() {
     } catch (err) {
       log("error", "ATS Direct scrape failed", err.message);
       stats.errors++;
+    }
+  }
+
+  // ── 4. Retry queued-manual jobs (up to 20 per cycle) ─────────────────────
+  const queued = applications
+    .filter(a => a.status === "queued-manual" && a.url)
+    .slice(0, 20);
+  if (queued.length > 0) {
+    log("info", `Retrying ${queued.length} queued jobs...`);
+    for (const app of queued) {
+      // Remove from applications so applyToJob won't skip it as already-applied
+      const idx = applications.findIndex(a => a.id === app.id);
+      if (idx !== -1) applications.splice(idx, 1);
+      // Find the original job record
+      const job = foundJobs.find(j => j.id === app.jobId) || {
+        id: app.jobId, title: app.title, company: app.company,
+        location: app.location, url: app.url, platform: app.platform,
+        applyUrl: app.url, score: app.score,
+      };
+      const applied = await applyToJob(job, { maxBrowserOpens });
+      if (applied) newThisCycle++;
     }
   }
 
