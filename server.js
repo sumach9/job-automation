@@ -600,34 +600,64 @@ const LOCATION_STATE_MAP = {
   "remote":           [],   // remote jobs allowed from anywhere
 };
 
+// Cities that are safe to match by name (won't cause false positives with other states)
+const SAFE_CITY_MATCH = new Set([
+  "seattle", "bellevue", "redmond", "tacoma", "spokane", "kirkland", "renton",
+  "bothell", "everett", "kent", "federal way", "olympia", "vancouver",
+  "portland", "san francisco", "los angeles", "san jose", "san diego",
+  "boston", "chicago", "austin", "denver", "phoenix", "atlanta", "miami",
+  "dallas", "houston", "minneapolis", "detroit", "pittsburgh",
+]);
+
+// Locations that are AMBIGUOUS — never match by city name string alone
+// (e.g. "Washington" also appears in "Washington, DC"; "New York" is fine)
+const AMBIGUOUS_NAMES = new Set(["washington", "virginia", "columbia"]);
+
 function isLocationMatch(jobLocation, configuredLocations) {
-  if (!jobLocation) return true; // no location data — allow it
-  const jl = jobLocation.toLowerCase();
+  if (!jobLocation) return true;
+  const jl = jobLocation.toLowerCase().trim();
 
-  // Always allow remote jobs
-  if (/remote|anywhere|work from home|wfh/i.test(jl)) return true;
+  // Always allow remote
+  if (/\bremote\b|anywhere|work from home|\bwfh\b/i.test(jl)) return true;
 
-  // Build the set of allowed state codes from user's configured locations
+  // Explicitly block DC / mid-Atlantic if user only wants WA
+  const isDCArea = /washington,?\s*(dc|d\.c\.)|district of columbia|\b(va|virginia|maryland|md)\b/i.test(jl);
+  const userWantsWAOnly = (configuredLocations || []).every(l => {
+    const k = l.trim().toLowerCase();
+    return ["seattle","washington","washington state","bellevue","redmond","tacoma","spokane"].includes(k);
+  });
+  if (isDCArea && userWantsWAOnly) return false;
+
+  // Build allowed state codes from configured locations
   const allowedStates = new Set();
+  const allowedCities = new Set();
+
   for (const loc of configuredLocations) {
     const key = loc.trim().toLowerCase();
-    const states = LOCATION_STATE_MAP[key];
-    if (states) states.forEach(s => allowedStates.add(s));
-    else allowedStates.add(key.slice(0, 2)); // fallback: use first 2 chars as state code
+    const mapped = LOCATION_STATE_MAP[key];
+    if (mapped) {
+      mapped.forEach(s => allowedStates.add(s));
+    }
+    // Only add city for safe (unambiguous) names
+    if (SAFE_CITY_MATCH.has(key) && !AMBIGUOUS_NAMES.has(key)) {
+      allowedCities.add(key);
+    }
   }
 
-  if (allowedStates.size === 0) return true; // no state mapping — allow all
+  if (allowedStates.size === 0 && allowedCities.size === 0) return true;
 
-  // Check if job location contains any of the allowed states
+  // Check state code: ", WA" or "(WA)" or "WA," etc.
   for (const state of allowedStates) {
-    // Match ", WA" or "(WA)" or "WA " patterns
-    if (new RegExp(`(^|[\\s,\\(])${state}([\\s,\\)\\.]|$)`, "i").test(jl)) return true;
+    if (new RegExp(`(^|[\\s,\\(\\[])${state}([\\s,\\)\\]\\.]|$)`, "i").test(jl)) return true;
   }
 
-  // Also match if job location directly contains a configured city/state name
-  for (const loc of configuredLocations) {
-    if (jl.includes(loc.trim().toLowerCase())) return true;
+  // Check safe city names (exact word boundary match)
+  for (const city of allowedCities) {
+    if (new RegExp(`\\b${city}\\b`, "i").test(jl)) return true;
   }
+
+  // Explicitly allow "Washington State" as a job location string
+  if (allowedStates.has("wa") && /washington\s+state/i.test(jl)) return true;
 
   return false;
 }
