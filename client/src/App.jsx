@@ -1129,69 +1129,193 @@ function OutreachPage({ showToast, profile }) {
 
 // ─── AI Assistant Chat ────────────────────────────────────────────────────────
 function AssistantChat({ showToast, profile }) {
-  const [messages, setMessages] = useState([
-    { role:"assistant", content:"👋 Hi! I'm your **JobPilot AI Assistant**.\n\nI can help you:\n- 🎯 **Score any job** against your profile — paste a job description or URL\n- 🧠 **Find skill gaps** and what to add to your resume\n- ✉️ **Write recruiter outreach** messages tailored to each role\n- 🗣️ **Prepare for interviews** with role-specific questions\n\nDrop a job URL here, paste a job description, or just ask me anything!", ts: Date.now() }
-  ]);
-  const [input, setInput]       = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [jobContext, setJobContext] = useState(null);
+  const WELCOME = { role:"assistant", content:"", isWelcome:true, ts:Date.now() };
+  const [messages,  setMessages]  = useState([WELCOME]);
+  const [input,     setInput]     = useState("");
+  const [loading,   setLoading]   = useState(false);
+  const [dragging,  setDragging]  = useState(false);
+  const [jobCtx,    setJobCtx]    = useState(null);
+  const [steps,     setSteps]     = useState([]);
+  const [wfData,    setWfData]    = useState(null);
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages, steps]);
 
-  const SUGGESTIONS = [
-    "Score this job for me",
-    "What skills am I missing?",
-    "Write a recruiter message",
-    "Help me prep for an interview",
-    "Tailor my resume for this role",
+  const WORKFLOW_CHIPS = [
+    { label:"Find me Data Scientist jobs", icon:"🔍" },
+    { label:"Find me Data Engineer jobs",  icon:"⚙️" },
+    { label:"Analyze my job market fit",   icon:"📊" },
   ];
+  const QA_CHIPS = [
+    { label:"Score a job for me",        icon:"🎯" },
+    { label:"Write recruiter outreach",  icon:"✉️" },
+    { label:"Prep me for interviews",    icon:"🗣️" },
+    { label:"What skills am I missing?", icon:"🧠" },
+  ];
+
+  function scoreColor(s) {
+    if (s >= 3.5) return "#16a34a";
+    if (s >= 2.5) return "#d97706";
+    return "#dc2626";
+  }
+
+  function renderMsg(content) {
+    const html = (content || "")
+      .replace(/\[SCORE:([\d.]+)\]/g, (_, v) => {
+        const c = scoreColor(parseFloat(v));
+        return `<span style="background:${c}18;color:${c};border:1px solid ${c}40;border-radius:6px;padding:2px 9px;font-weight:700;font-size:13px">${v}/5</span>`;
+      })
+      .replace(/\[SKILL:([^\]]+)\]/g, `<span style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;margin:0 2px">&#10003; $1</span>`)
+      .replace(/\[MISSING:([^\]]+)\]/g, `<span style="background:#fee2e2;color:#dc2626;border:1px solid #fecaca;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;margin:0 2px">&#10007; $1</span>`)
+      .replace(/\[OUTREACH_DRAFT\]/g, `<span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:600">✉ Outreach Draft</span>`)
+      .replace(/\[RECRUITER:([^\]]+)\]/g, `<span style="color:#2563eb;cursor:pointer;font-size:12px;font-weight:600">&#128100; $1</span>`)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, `<code style="background:#f0eeec;border-radius:3px;padding:1px 5px;font-size:12px;font-family:monospace">$1</code>`)
+      .replace(/^#{1,3}\s+(.+)$/gm, "<strong style='font-size:14px'>$1</strong>")
+      .replace(/^[-*]\s+(.+)$/gm, "&bull;&nbsp;$1<br/>")
+      .replace(/\n/g, "<br/>");
+    return <span dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+
+  // Job card for workflow results
+  function JobCard({ job, i }) {
+    const bd = job.scoreBreakdown || {};
+    const sc = scoreColor(job.score);
+    return (
+      <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:10, padding:"12px 14px", marginBottom:8, borderLeft:`3px solid ${sc}` }}>
+        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:8 }}>
+          <div>
+            <div style={{ fontWeight:700, fontSize:13, color:"#1c1917" }}>{i+1}. {job.title}</div>
+            <div style={{ fontSize:12, color:"#78716c", marginTop:2 }}>{job.company}{job.location ? " · "+job.location : ""}</div>
+          </div>
+          <span style={{ background:sc+"18", color:sc, border:`1px solid ${sc}40`, borderRadius:6, padding:"2px 9px", fontWeight:700, fontSize:13, flexShrink:0 }}>{job.score}/5</span>
+        </div>
+        {bd.matchedSkills?.length > 0 && (
+          <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:7 }}>
+            {bd.matchedSkills.slice(0,5).map((s,j) => (
+              <span key={j} style={{ background:"#dcfce7", color:"#16a34a", border:"1px solid #bbf7d0", borderRadius:4, padding:"1px 7px", fontSize:10, fontWeight:600 }}>&#10003; {s}</span>
+            ))}
+            {bd.missingSkills?.slice(0,3).map((s,j) => (
+              <span key={j} style={{ background:"#fee2e2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:4, padding:"1px 7px", fontSize:10, fontWeight:600 }}>&#10007; {s}</span>
+            ))}
+          </div>
+        )}
+        <div style={{ display:"flex", gap:6, marginTop:9 }}>
+          {job.url && <a href={job.url} target="_blank" rel="noreferrer" style={{ background:"#2563eb", color:"#fff", borderRadius:5, padding:"4px 10px", fontSize:11, fontWeight:700, textDecoration:"none" }}>Apply →</a>}
+          {job.recruiterSearchUrl && <a href={job.recruiterSearchUrl} target="_blank" rel="noreferrer" style={{ background:"#f0f9ff", color:"#0369a1", border:"1px solid #bae6fd", borderRadius:5, padding:"4px 10px", fontSize:11, fontWeight:600, textDecoration:"none" }}>Find Recruiter</a>}
+        </div>
+      </div>
+    );
+  }
+
+  // Workflow summary card
+  function WorkflowCard({ data }) {
+    if (!data) return null;
+    return (
+      <div style={{ background:"#f8faff", border:"1px solid #dbeafe", borderRadius:12, padding:"14px 16px", marginBottom:12 }}>
+        {/* Stats row */}
+        <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
+          {[
+            { label:"Jobs Found", val:data.totalFound, color:"#2563eb" },
+            { label:"Strong Matches", val:data.scoredJobs?.length||0, color:"#16a34a" },
+            { label:"Top Company", val:(data.topCompanies?.[0]?.[0]||"—"), color:"#7c3aed" },
+          ].map(({ label, val, color }) => (
+            <div key={label} style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:8, padding:"8px 14px", textAlign:"center", flex:1, minWidth:90 }}>
+              <div style={{ fontSize:20, fontWeight:900, color }}>{val}</div>
+              <div style={{ fontSize:10, color:"#94a3b8", marginTop:2 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Top skills demanded */}
+        {data.topSkills?.length > 0 && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>Top Skills in Demand</div>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              {data.topSkills.map((s,i) => (
+                <span key={i} style={{ background:"#eff6ff", color:"#2563eb", border:"1px solid #bfdbfe", borderRadius:4, padding:"2px 8px", fontSize:11 }}>{s}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Scored jobs */}
+        {data.scoredJobs?.length > 0 && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>Ranked Shortlist</div>
+            {data.scoredJobs.slice(0,5).map((j,i) => <JobCard key={i} job={j} i={i} />)}
+          </div>
+        )}
+
+        {/* Adjacent titles */}
+        {data.adjacents?.length > 0 && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>Pool Expansion — Try These Titles</div>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              {data.adjacents.map((t,i) => (
+                <span key={i} style={{ background:"#f0fdf4", color:"#16a34a", border:"1px solid #bbf7d0", borderRadius:4, padding:"3px 10px", fontSize:11, fontWeight:600 }}>+ {t}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Follow-ups */}
+        {data.followUp?.length > 0 && (
+          <div>
+            <div style={{ fontSize:10, fontWeight:700, color:"#94a3b8", textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>Past Applications to Follow Up</div>
+            {data.followUp.map((a,i) => (
+              <div key={i} style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, padding:"7px 11px", fontSize:11, color:"#92400e", marginBottom:4 }}>
+                &#128336; <strong>{a.title}</strong> @ {a.company} — {a.status} · Applied {new Date(a.appliedAt).toLocaleDateString()}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   async function send(text) {
     const msg = (text || input).trim();
     if (!msg || loading) return;
     setInput("");
+    setSteps([]);
+    setWfData(null);
     const userMsg = { role:"user", content:msg, ts:Date.now() };
-    const next = [...messages, userMsg];
-    setMessages(next);
+    const history = messages.filter(m => !m.isWelcome && m.role !== "system-info");
+    const next = [...history, userMsg];
+    setMessages(prev => [...prev, userMsg]);
     setLoading(true);
 
-    // If it's a URL, score it first
+    // URL: score it first
     const urlMatch = msg.match(/https?:\/\/\S+/);
     if (urlMatch) {
-      setMessages(m => [...m, { role:"assistant", content:"🔍 Fetching and scoring that job...", ts:Date.now(), loading:true }]);
+      setMessages(m => [...m, { role:"assistant", content:"Fetching and scoring that job...", ts:Date.now(), loading:true }]);
       try {
         const r = await apiFetch(`${API}/chat/score-url`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ url:urlMatch[0] }) }).then(r=>r.json());
         if (r.ok) {
-          setJobContext(r.job);
-          setMessages(m => {
-            const filtered = m.filter(x=>!x.loading);
-            const bd = r.job.scoreBreakdown || {};
-            const matched = (bd.matchedSkills||[]).map(s=>`[SKILL:${s}]`).join(" ");
-            const missing = (bd.missingSkills||[]).map(s=>`[MISSING:${s}]`).join(" ");
-            const autoNote = `📊 **Auto-scored:** [SCORE:${r.job.score}] (${r.scoreLabel})\n**Jaccard:** ${bd.jaccardPct||"—"} · **TF-Cosine:** ${bd.cosinePct||"—"}\n${matched ? "✅ **Matched:** "+matched : ""}\n${missing ? "❌ **Missing:** "+missing : ""}`;
-            return [...filtered, { role:"system-info", content:autoNote, ts:Date.now() }];
-          });
+          setJobCtx(r.job);
+          const bd = r.job.scoreBreakdown || {};
+          const autoNote = `Auto-scored: [SCORE:${r.job.score}] (${r.scoreLabel})\nJaccard: ${bd.jaccardPct||"--"} | TF-Cosine: ${bd.cosinePct||"--"}\n${(bd.matchedSkills||[]).map(s=>"[SKILL:"+s+"]").join(" ")}\n${(bd.missingSkills||[]).map(s=>"[MISSING:"+s+"]").join(" ")}`;
+          setMessages(m => [...m.filter(x=>!x.loading), { role:"system-info", content:autoNote, ts:Date.now() }]);
         }
       } catch {}
     }
 
     try {
       const resp = await apiFetch(`${API}/chat`, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ messages:next, jobContext }),
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ messages:next, jobContext:jobCtx }),
       });
       if (!resp.ok) throw new Error("Chat API error");
 
-      const reader = resp.body.getReader();
+      const reader  = resp.body.getReader();
       const decoder = new TextDecoder();
       let assistantMsg = { role:"assistant", content:"", ts:Date.now() };
-      setMessages(m => [...m.filter(x=>!x.loading), assistantMsg]);
-
+      let appended = false;
       let buf = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1202,138 +1326,148 @@ function AssistantChat({ showToast, profile }) {
           if (!line.startsWith("data:")) continue;
           try {
             const evt = JSON.parse(line.slice(5).trim());
-            if (evt.type === "delta") {
+            if (evt.type === "step") {
+              setSteps(s => [...s.filter(x=>x.step!==evt.step), { step:evt.step, label:evt.label, done:false }]);
+            } else if (evt.type === "workflow-data") {
+              setWfData(evt.data);
+              setSteps(s => s.map(x => ({ ...x, done:true })));
+            } else if (evt.type === "delta") {
+              if (!appended) {
+                setMessages(m => [...m.filter(x=>!x.loading), assistantMsg]);
+                appended = true;
+              }
               assistantMsg = { ...assistantMsg, content: assistantMsg.content + evt.content };
               setMessages(m => [...m.slice(0,-1), assistantMsg]);
             }
           } catch {}
         }
       }
+      if (!appended) setMessages(m => m.filter(x=>!x.loading));
     } catch (err) {
-      setMessages(m => [...m.filter(x=>!x.loading), { role:"assistant", content:`⚠️ ${err.message}`, ts:Date.now() }]);
+      setMessages(m => [...m.filter(x=>!x.loading), { role:"assistant", content:"Error: "+err.message, ts:Date.now() }]);
     }
     setLoading(false);
+    setSteps([]);
     inputRef.current?.focus();
   }
 
   function onDrop(e) {
-    e.preventDefault();
-    setDragging(false);
+    e.preventDefault(); setDragging(false);
     const url  = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
     const text = e.dataTransfer.getData("text/plain");
-    const msg  = url?.startsWith("http") ? url : text;
-    if (msg) send(msg);
-  }
-
-  // Render a message bubble — handles markdown-like tags
-  function renderMsg(content) {
-    const parts = [];
-    let text = content
-      .replace(/\[SCORE:([\d.]+)\]/g, (_, v) => {
-        const c = parseFloat(v) >= 3.5 ? "#16a34a" : parseFloat(v) >= 2.5 ? "#d97706" : "#dc2626";
-        return `<span style="background:${c}20;color:${c};border:1px solid ${c}40;border-radius:6px;padding:2px 9px;font-weight:700;font-size:13px">${v}/5</span>`;
-      })
-      .replace(/\[SKILL:([^\]]+)\]/g, '<span style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;margin:0 2px">✓ $1</span>')
-      .replace(/\[MISSING:([^\]]+)\]/g, '<span style="background:#fee2e2;color:#dc2626;border:1px solid #fecaca;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;margin:0 2px">✗ $1</span>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`([^`]+)`/g, '<code style="background:#f0eeec;border-radius:3px;padding:1px 5px;font-size:12px;font-family:monospace">$1</code>')
-      .replace(/\n/g, '<br/>');
-    return <span dangerouslySetInnerHTML={{ __html:text }} />;
+    send(url?.startsWith("http") ? url : text);
   }
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 56px)", maxWidth:860, margin:"0 auto" }}
+    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 56px)", maxWidth:900, margin:"0 auto", position:"relative" }}
       onDragOver={e=>{ e.preventDefault(); setDragging(true); }}
       onDragLeave={()=>setDragging(false)}
       onDrop={onDrop}
     >
-      {/* Drag overlay */}
       {dragging && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(37,99,235,.15)", border:"3px dashed #2563eb", zIndex:999, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:12, pointerEvents:"none" }}>
-          <div style={{ fontSize:18, fontWeight:700, color:"#2563eb" }}>🔗 Drop job URL or text here to score it</div>
+        <div style={{ position:"fixed", inset:0, background:"rgba(37,99,235,.12)", border:"3px dashed #2563eb", zIndex:999, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none", borderRadius:12 }}>
+          <div style={{ fontSize:18, fontWeight:700, color:"#2563eb", background:"#fff", padding:"12px 24px", borderRadius:8 }}>Drop job URL or text here to score it</div>
         </div>
       )}
 
-      {/* Job context banner */}
-      {jobContext && (
-        <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:8, padding:"8px 14px", margin:"8px 0 0", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
-          <div style={{ fontSize:12, color:"#1d4ed8" }}>
-            <strong>📌 Job context:</strong> {jobContext.title || "Job"} {jobContext.company ? `@ ${jobContext.company}` : ""}
-            {jobContext.score !== undefined && <span style={{ marginLeft:8, background:"#2563eb", color:"#fff", borderRadius:4, padding:"1px 7px", fontSize:11, fontWeight:700 }}>{jobContext.score}/5</span>}
+      {/* Job context pill */}
+      {jobCtx && (
+        <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:8, padding:"6px 12px", margin:"6px 0 0", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <span style={{ fontSize:12, color:"#1d4ed8" }}>
+            <strong>Job context:</strong> {jobCtx.title} {jobCtx.company ? "@ "+jobCtx.company : ""}
+            {jobCtx.score != null && <span style={{ marginLeft:8, background:"#2563eb", color:"#fff", borderRadius:4, padding:"1px 7px", fontSize:11, fontWeight:700 }}>{jobCtx.score}/5</span>}
+          </span>
+          <button onClick={()=>setJobCtx(null)} style={{ background:"none", border:"none", cursor:"pointer", color:"#93c5fd", fontSize:18, lineHeight:1 }}>x</button>
+        </div>
+      )}
+
+      {/* Messages area */}
+      <div style={{ flex:1, overflowY:"auto", padding:"16px 0 8px", display:"flex", flexDirection:"column", gap:10 }}>
+
+        {/* Welcome card */}
+        <div style={{ background:"linear-gradient(135deg,#1e2d45 0%,#0d1117 100%)", border:"1px solid #1a2744", borderRadius:12, padding:"20px 22px", marginBottom:4 }}>
+          <div style={{ fontSize:22, marginBottom:4 }}>⚡</div>
+          <div style={{ fontWeight:800, fontSize:16, color:"#fff", marginBottom:6 }}>JobPilot AI Assistant</div>
+          <div style={{ fontSize:13, color:"#94a3b8", lineHeight:1.6, marginBottom:14 }}>
+            Run your entire job search workflow in one chat — just like SeekOut does for recruiters, but built for you.
           </div>
-          <button onClick={()=>setJobContext(null)} style={{ background:"none", border:"none", cursor:"pointer", color:"#93c5fd", fontSize:16, lineHeight:1 }}>×</button>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+            {WORKFLOW_CHIPS.map(c => (
+              <button key={c.label} onClick={()=>send(c.label)} style={{ background:"#2563eb", border:"none", borderRadius:6, padding:"6px 12px", fontSize:12, fontWeight:600, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
+                {c.icon} {c.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {QA_CHIPS.map(c => (
+              <button key={c.label} onClick={()=>send(c.label)} style={{ background:"#161d2b", border:"1px solid #1e2d45", borderRadius:6, padding:"5px 11px", fontSize:11, fontWeight:500, color:"#94a3b8", cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
+                {c.icon} {c.label}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
 
-      {/* Messages */}
-      <div style={{ flex:1, overflowY:"auto", padding:"16px 0", display:"flex", flexDirection:"column", gap:12 }}>
-        {messages.map((m, i) => {
-          const isUser  = m.role === "user";
-          const isInfo  = m.role === "system-info";
+        {/* Chat messages */}
+        {messages.filter(m=>!m.isWelcome).map((m, i) => {
+          const isUser = m.role === "user";
+          const isInfo = m.role === "system-info";
           if (isInfo) return (
-            <div key={i} style={{ alignSelf:"stretch", background:"#f8faff", border:"1px solid #dbeafe", borderRadius:8, padding:"10px 14px", fontSize:12, color:"#1e40af", lineHeight:1.7 }}>
+            <div key={i} style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"10px 14px", fontSize:12, color:"#0369a1", lineHeight:1.8 }}>
               {renderMsg(m.content)}
             </div>
           );
           return (
             <div key={i} style={{ display:"flex", justifyContent:isUser?"flex-end":"flex-start", gap:8, alignItems:"flex-start" }}>
-              {!isUser && <div style={{ width:30, height:30, borderRadius:"50%", background:"#2563eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0, marginTop:2 }}>⚡</div>}
-              <div style={{
-                maxWidth:"78%", background: isUser ? "#2563eb" : "#fff",
-                color: isUser ? "#fff" : "#1c1917",
-                border: isUser ? "none" : "1px solid #e5e3e0",
-                borderRadius: isUser ? "18px 18px 4px 18px" : "4px 18px 18px 18px",
-                padding:"10px 14px", fontSize:13, lineHeight:1.65,
-                boxShadow:"0 1px 3px rgba(0,0,0,.06)",
-              }}>
-                {m.loading ? <span style={{ color:"#94a3b8" }}>●●●</span> : renderMsg(m.content)}
+              {!isUser && <div style={{ width:28, height:28, borderRadius:"50%", background:"#2563eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, flexShrink:0, marginTop:2 }}>⚡</div>}
+              <div style={{ maxWidth:"80%", background:isUser?"#2563eb":"#fff", color:isUser?"#fff":"#1c1917", border:isUser?"none":"1px solid #e5e3e0", borderRadius:isUser?"16px 16px 4px 16px":"4px 16px 16px 16px", padding:"10px 14px", fontSize:13, lineHeight:1.65, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+                {m.loading ? <span style={{ color:"#94a3b8" }}>• • •</span> : renderMsg(m.content)}
               </div>
-              {isUser && <div style={{ width:30, height:30, borderRadius:"50%", background:"#f0eeec", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:"#78716c", flexShrink:0, marginTop:2 }}>
-                {(profile?.name||"U")[0].toUpperCase()}
-              </div>}
+              {isUser && <div style={{ width:28, height:28, borderRadius:"50%", background:"#f0eeec", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:"#78716c", flexShrink:0, marginTop:2 }}>{(profile?.name||"U")[0].toUpperCase()}</div>}
             </div>
           );
         })}
-        {loading && !messages.some(m=>m.loading) && (
+
+        {/* Workflow step indicators */}
+        {steps.length > 0 && (
+          <div style={{ background:"#f8faff", border:"1px solid #dbeafe", borderRadius:8, padding:"10px 14px" }}>
+            {steps.map(st => (
+              <div key={st.step} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, color:st.done?"#16a34a":"#2563eb", marginBottom:3 }}>
+                <span style={{ fontSize:14 }}>{st.done ? "✓" : "..."}</span>
+                <span style={{ fontWeight:st.done?600:400 }}>Step {st.step}: {st.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Workflow data card */}
+        {wfData && <WorkflowCard data={wfData} />}
+
+        {/* Loading dots */}
+        {loading && !messages.some(m=>m.loading) && steps.length===0 && (
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <div style={{ width:30, height:30, borderRadius:"50%", background:"#2563eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚡</div>
-            <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:"4px 18px 18px 18px", padding:"10px 16px", color:"#94a3b8", fontSize:13 }}>●●●</div>
+            <div style={{ width:28, height:28, borderRadius:"50%", background:"#2563eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>⚡</div>
+            <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:"4px 16px 16px 16px", padding:"10px 14px", color:"#94a3b8", fontSize:13 }}>• • •</div>
           </div>
         )}
         <div ref={bottomRef} />
       </div>
 
-      {/* Suggestion chips */}
-      {messages.length <= 2 && (
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", paddingBottom:8 }}>
-          {SUGGESTIONS.map(s => (
-            <button key={s} onClick={()=>send(s)} style={{ background:"#fafaf9", border:"1px solid #e5e3e0", borderRadius:20, padding:"5px 12px", fontSize:12, color:"#78716c", cursor:"pointer", fontWeight:500 }}>{s}</button>
-          ))}
-        </div>
-      )}
-
       {/* Input bar */}
-      <div style={{ borderTop:"1px solid #e5e3e0", paddingTop:12, paddingBottom:8 }}>
+      <div style={{ borderTop:"1px solid #e5e3e0", paddingTop:10, paddingBottom:6 }}>
         <div style={{ display:"flex", gap:8, alignItems:"flex-end", background:"#fff", border:"1px solid #e5e3e0", borderRadius:12, padding:"8px 12px", boxShadow:"0 1px 4px rgba(0,0,0,.06)" }}>
-          <textarea
-            ref={inputRef}
-            value={input}
+          <textarea ref={inputRef} value={input}
             onChange={e=>{ setInput(e.target.value); e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight,120)+"px"; }}
-            onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); } }}
-            placeholder="Ask anything… or drop a job URL / paste a job description"
-            disabled={loading}
-            rows={1}
-            style={{ flex:1, border:"none", outline:"none", resize:"none", fontSize:13, fontFamily:"inherit", lineHeight:1.5, background:"transparent", color:"#1c1917", minHeight:36 }}
+            onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); } }}
+            placeholder="Ask anything or say 'Find me Data Scientist jobs'…"
+            disabled={loading} rows={1}
+            style={{ flex:1, border:"none", outline:"none", resize:"none", fontSize:13, fontFamily:"inherit", lineHeight:1.5, background:"transparent", color:"#1c1917", minHeight:34 }}
           />
-          <button
-            onClick={()=>send()}
-            disabled={loading || !input.trim()}
-            style={{ background:loading||!input.trim()?"#e5e3e0":"#2563eb", border:"none", borderRadius:8, padding:"7px 14px", color:loading||!input.trim()?"#a8a29e":"#fff", cursor:loading||!input.trim()?"not-allowed":"pointer", fontWeight:700, fontSize:13, transition:".15s" }}
-          >
-            {loading ? "…" : "Send →"}
+          <button onClick={()=>send()} disabled={loading||!input.trim()}
+            style={{ background:loading||!input.trim()?"#e5e3e0":"#2563eb", border:"none", borderRadius:8, padding:"7px 14px", color:loading||!input.trim()?"#a8a29e":"#fff", cursor:loading||!input.trim()?"not-allowed":"pointer", fontWeight:700, fontSize:13, transition:".15s", flexShrink:0 }}>
+            {loading?"...":"Send"}
           </button>
         </div>
-        <div style={{ fontSize:10, color:"#d6d3d1", textAlign:"center", marginTop:5 }}>Enter to send · Shift+Enter for newline · Drag job URLs here to score instantly</div>
+        <div style={{ fontSize:10, color:"#d6d3d1", textAlign:"center", marginTop:4 }}>Enter to send · Drag job URLs here to score · Say "Find me [role] jobs" to run full workflow</div>
       </div>
     </div>
   );
