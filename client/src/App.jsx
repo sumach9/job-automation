@@ -49,6 +49,7 @@ const NAV = [
   { id:"applications", label:"Applications",  icon:"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
   { id:"outreach",     label:"Outreach",      icon:"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" },
   { id:"assistant",    label:"AI Assistant",  icon:"M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" },
+  { id:"interview",    label:"Interview",     icon:"M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" },
   { id:"settings",     label:"Settings",      icon:"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
 ];
 
@@ -1473,6 +1474,389 @@ function AssistantChat({ showToast, profile }) {
   );
 }
 
+// ─── Mock Interview Studio ────────────────────────────────────────────────────
+function MockInterviewStudio({ showToast, applications, profile }) {
+  const [phase, setPhase]               = useState("setup");
+  const [jobInput, setJobInput]         = useState({ title:"", company:"", description:"" });
+  const [questions, setQuestions]       = useState([]);
+  const [currentQ, setCurrentQ]         = useState(0);
+  const [isRecording, setIsRecording]   = useState(false);
+  const [liveText, setLiveText]         = useState("");
+  const [typedText, setTypedText]       = useState("");
+  const [fillerCount, setFillerCount]   = useState(0);
+  const [timer, setTimer]               = useState(0);
+  const [sessionAnswers, setSessionAnswers] = useState([]);
+  const [currentFeedback, setCurrentFeedback] = useState(null);
+  const [fbLoading, setFbLoading]       = useState(false);
+  const [qLoading, setQLoading]         = useState(false);
+  const [sessions, setSessions]         = useState([]);
+  const [hasSpeech, setHasSpeech]       = useState(false);
+  const recRef   = useRef(null);
+  const timerRef = useRef(null);
+
+  const FILLERS = ["um","uh","like","you know","basically","actually","literally","so,","right,","i mean"];
+
+  useEffect(() => {
+    setHasSpeech(!!(window.SpeechRecognition || window.webkitSpeechRecognition));
+    try { const s = localStorage.getItem("jp_interview_sessions"); if (s) setSessions(JSON.parse(s)); } catch {}
+  }, []);
+
+  function countFillers(t) {
+    const low = t.toLowerCase();
+    return FILLERS.reduce((c, f) => c + ((low.match(new RegExp("\\b" + f.replace(/,/,"").trim() + "\\b","g")) || []).length), 0);
+  }
+
+  async function generateQuestions() {
+    setQLoading(true);
+    try {
+      const d = await apiFetch(`${API}/interview/questions`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ job: jobInput, profile }),
+      }).then(r => r.json());
+      if (d.ok && d.questions?.length > 0) {
+        setQuestions(d.questions); setPhase("session");
+        setCurrentQ(0); setSessionAnswers([]); setCurrentFeedback(null);
+      } else { showToast("Could not generate questions — check GROQ_API_KEY", "error"); }
+    } catch(e) { showToast("Error: "+e.message, "error"); }
+    setQLoading(false);
+  }
+
+  function startRecording() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.continuous = true; r.interimResults = true; r.lang = "en-US";
+    let final = "";
+    r.onresult = e => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
+        else interim = e.results[i][0].transcript;
+      }
+      const full = final + interim;
+      setLiveText(full); setFillerCount(countFillers(full));
+    };
+    r.onerror = () => { clearInterval(timerRef.current); setIsRecording(false); };
+    r.onend   = () => { if (recRef.current?.active) r.start(); };
+    recRef.current = { r, active:true, getText:() => final };
+    r.start();
+    setIsRecording(true); setLiveText(""); setFillerCount(0); setTimer(0);
+    timerRef.current = setInterval(() => setTimer(t => t+1), 1000);
+  }
+
+  function stopRecording() {
+    if (recRef.current) { recRef.current.active = false; recRef.current.r.stop(); }
+    clearInterval(timerRef.current); setIsRecording(false);
+  }
+
+  async function submitAnswer() {
+    const text = (liveText || typedText).trim();
+    if (!text) { showToast("No answer to submit","error"); return; }
+    setFbLoading(true);
+    try {
+      const d = await apiFetch(`${API}/interview/feedback`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ question: questions[currentQ]?.question, answer: text, jobTitle: jobInput.title }),
+      }).then(r => r.json());
+      setCurrentFeedback({ ...d, transcript:text, fillers:fillerCount, duration:timer });
+    } catch {
+      setCurrentFeedback({ strength:3, feedback:"Answer saved.", starScore:{}, transcript:text, fillers:fillerCount, duration:timer });
+    }
+    setFbLoading(false);
+  }
+
+  function nextQuestion() {
+    const ans = { question:questions[currentQ]?.question, type:questions[currentQ]?.type, ...currentFeedback };
+    const updated = [...sessionAnswers, ans];
+    setSessionAnswers(updated); setCurrentFeedback(null);
+    setLiveText(""); setTypedText(""); setFillerCount(0); setTimer(0);
+    if (currentQ + 1 >= questions.length) {
+      const sess = { id:Date.now(), job:jobInput, date:new Date().toISOString(), answers:updated,
+        overallScore: +(updated.reduce((s,a)=>s+(a.strength||3),0)/updated.length).toFixed(1) };
+      const all = [sess, ...sessions].slice(0,10);
+      setSessions(all);
+      try { localStorage.setItem("jp_interview_sessions", JSON.stringify(all)); } catch {}
+      setPhase("summary");
+    } else { setCurrentQ(q => q+1); }
+  }
+
+  const fmtTime = s => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,"0")}`;
+  const sColor  = n => n >= 4 ? "#16a34a" : n >= 3 ? "#d97706" : "#dc2626";
+  const btn = (label, onClick, opts={}) => (
+    <button onClick={onClick} disabled={opts.disabled} style={{
+      background: opts.disabled ? "#e5e3e0" : (opts.bg||"#1c1917"),
+      color: opts.disabled ? "#a8a29e" : (opts.color||"#fff"),
+      border: opts.outline ? "1px solid #e5e3e0" : "none",
+      borderRadius:9, padding:"11px "+(opts.wide?"28px":"20px"), fontWeight:700, fontSize:13,
+      cursor: opts.disabled ? "not-allowed":"pointer", transition:".15s",
+    }}>{label}</button>
+  );
+
+  // ── SETUP ──
+  if (phase === "setup") {
+    const recent = (applications||[]).filter(a=>["auto-applied","browser-opened","interviewing"].includes(a.status)).slice(0,6);
+    return (
+      <div style={{ maxWidth:680 }}>
+        <div style={{ marginBottom:24 }}>
+          <h2 style={{ fontSize:22, fontWeight:700, color:"#1c1917", margin:0 }}>Mock Interview Studio</h2>
+          <p style={{ color:"#78716c", marginTop:4, fontSize:14 }}>AI-powered practice — STAR coaching, filler word tracking, real-time feedback.</p>
+        </div>
+
+        {recent.length > 0 && (
+          <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:12, padding:18, marginBottom:16 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#a8a29e", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:12 }}>Quick Start — Your Applications</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+              {recent.map((a,i) => {
+                const sel = jobInput.title===a.title && jobInput.company===a.company;
+                return (
+                  <button key={i} onClick={()=>setJobInput({title:a.title||"",company:a.company||"",description:a.description||""})}
+                    style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:sel?"#eff6ff":"#fafaf9", border:`1px solid ${sel?"#bfdbfe":"#e5e3e0"}`, borderRadius:8, padding:"10px 14px", cursor:"pointer", textAlign:"left" }}>
+                    <div>
+                      <div style={{ fontWeight:600, fontSize:13, color:"#1c1917" }}>{a.title}</div>
+                      <div style={{ fontSize:11, color:"#78716c" }}>{a.company}{a.location?" · "+a.location:""}</div>
+                    </div>
+                    {sel && <span style={{ fontSize:12, color:"#2563eb", fontWeight:600 }}>✓ Selected</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:12, padding:18, marginBottom:16 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#a8a29e", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:12 }}>Enter Role Manually</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#57534e", display:"block", marginBottom:4 }}>Job Title *</label>
+              <input value={jobInput.title} onChange={e=>setJobInput(j=>({...j,title:e.target.value}))} placeholder="Data Scientist"
+                style={{ width:"100%", border:"1px solid #d6d3d1", borderRadius:7, padding:"8px 10px", fontSize:13, boxSizing:"border-box" }}/>
+            </div>
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#57534e", display:"block", marginBottom:4 }}>Company</label>
+              <input value={jobInput.company} onChange={e=>setJobInput(j=>({...j,company:e.target.value}))} placeholder="Amazon"
+                style={{ width:"100%", border:"1px solid #d6d3d1", borderRadius:7, padding:"8px 10px", fontSize:13, boxSizing:"border-box" }}/>
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:600, color:"#57534e", display:"block", marginBottom:4 }}>Job Description (optional — improves question quality)</label>
+            <textarea value={jobInput.description} onChange={e=>setJobInput(j=>({...j,description:e.target.value}))}
+              rows={3} placeholder="Paste job description here…"
+              style={{ width:"100%", border:"1px solid #d6d3d1", borderRadius:7, padding:"8px 10px", fontSize:13, fontFamily:"inherit", resize:"vertical", boxSizing:"border-box" }}/>
+          </div>
+        </div>
+
+        {!hasSpeech && (
+          <div style={{ background:"#fef9c3", border:"1px solid #fde68a", borderRadius:8, padding:"10px 14px", marginBottom:14, fontSize:12, color:"#b45309" }}>
+            Voice input works best in Chrome or Edge. You can also type your answers.
+          </div>
+        )}
+
+        {btn(qLoading ? "Generating questions…" : "Start Interview →", generateQuestions, { disabled:!jobInput.title||qLoading, bg:"#2563eb" })}
+
+        {sessions.length > 0 && (
+          <div style={{ marginTop:32 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1c1917", marginBottom:10 }}>Past Sessions</div>
+            {sessions.map((s,i)=>(
+              <div key={i} style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div>
+                  <div style={{ fontWeight:600, fontSize:13, color:"#1c1917" }}>{s.job.title} @ {s.job.company||"—"}</div>
+                  <div style={{ fontSize:11, color:"#a8a29e", marginTop:2 }}>{new Date(s.date).toLocaleDateString()} · {s.answers.length} questions</div>
+                </div>
+                <span style={{ background:sColor(s.overallScore)+"18", color:sColor(s.overallScore), border:`1px solid ${sColor(s.overallScore)}30`, borderRadius:6, padding:"3px 10px", fontWeight:700, fontSize:13 }}>{s.overallScore}/5</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── SESSION ──
+  if (phase === "session") {
+    const q     = questions[currentQ];
+    const pct   = (currentQ / questions.length) * 100;
+    const ansText = liveText || typedText;
+
+    return (
+      <div style={{ maxWidth:700 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <div>
+            <div style={{ fontSize:12, color:"#a8a29e" }}>{jobInput.title}{jobInput.company?" @ "+jobInput.company:""}</div>
+            <div style={{ fontSize:14, fontWeight:700, color:"#1c1917", marginTop:2 }}>Question {currentQ+1} of {questions.length}</div>
+          </div>
+          <button onClick={()=>{ if(recRef.current){recRef.current.active=false;recRef.current.r.stop();} clearInterval(timerRef.current); setIsRecording(false); setPhase("setup"); }}
+            style={{ background:"none", border:"1px solid #e5e3e0", color:"#a8a29e", borderRadius:7, padding:"6px 12px", cursor:"pointer", fontSize:12 }}>
+            End Session
+          </button>
+        </div>
+
+        {/* Progress */}
+        <div style={{ height:4, background:"#f0eeec", borderRadius:4, marginBottom:22, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:pct+"%", background:"#2563eb", borderRadius:4, transition:"width .4s" }}/>
+        </div>
+
+        {/* Question card */}
+        <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:14, padding:22, marginBottom:14 }}>
+          <span style={{ background:q?.type==="behavioral"?"#eff6ff":"#f3e8ff", color:q?.type==="behavioral"?"#2563eb":"#7c3aed", borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:600 }}>
+            {q?.type==="behavioral" ? "Behavioral (STAR)" : "Technical"}
+          </span>
+          <div style={{ fontSize:16, fontWeight:600, color:"#1c1917", marginTop:12, lineHeight:1.55 }}>{q?.question}</div>
+          {q?.hint && <div style={{ fontSize:12, color:"#78716c", marginTop:8, borderTop:"1px solid #f5f4f2", paddingTop:8 }}>💡 {q.hint}</div>}
+        </div>
+
+        {!currentFeedback ? (
+          <>
+            {/* Answer area */}
+            <div style={{ background:"#fff", border:`2px solid ${isRecording?"#dc2626":"#e5e3e0"}`, borderRadius:14, padding:18, marginBottom:14, transition:"border-color .2s" }}>
+              {isRecording && (
+                <div style={{ display:"flex", gap:16, marginBottom:10, alignItems:"center" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <span style={{ width:8, height:8, borderRadius:"50%", background:"#dc2626", display:"inline-block",
+                      boxShadow:"0 0 0 0 rgba(220,38,38,.4)", animation:"pulse 1.4s ease infinite" }}/>
+                    <span style={{ fontSize:13, fontWeight:600, color:"#dc2626" }}>Recording {fmtTime(timer)}</span>
+                  </div>
+                  <span style={{ fontSize:12, color:fillerCount>3?"#dc2626":"#78716c", fontWeight:fillerCount>3?700:400 }}>
+                    {fillerCount} filler word{fillerCount!==1?"s":""}{fillerCount>3?" ⚠️":""}
+                  </span>
+                </div>
+              )}
+
+              {hasSpeech ? (
+                <div style={{ fontSize:13, color:liveText?"#1c1917":"#a8a29e", lineHeight:1.65, minHeight:70 }}>
+                  {liveText || (isRecording ? "Listening… speak your answer" : "Click Record to start")}
+                </div>
+              ) : (
+                <textarea value={typedText} onChange={e=>setTypedText(e.target.value)}
+                  rows={4} placeholder="Type your answer here…"
+                  style={{ width:"100%", border:"none", outline:"none", fontSize:13, fontFamily:"inherit", resize:"vertical", background:"transparent", color:"#1c1917" }}/>
+              )}
+            </div>
+
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+              {hasSpeech && !isRecording && (
+                <button onClick={startRecording} style={{ background:"#dc2626", color:"#fff", border:"none", borderRadius:9, padding:"11px 22px", fontWeight:700, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+                  🎤 Record Answer
+                </button>
+              )}
+              {isRecording && (
+                <button onClick={stopRecording} style={{ background:"#1c1917", color:"#fff", border:"none", borderRadius:9, padding:"11px 22px", fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                  ⏹ Stop Recording
+                </button>
+              )}
+              {ansText && !isRecording && btn(fbLoading?"Analyzing…":"Get AI Feedback →", submitAnswer, { disabled:fbLoading, bg:"#2563eb" })}
+              {ansText && !isRecording && (
+                <button onClick={()=>{setLiveText("");setTypedText("");setFillerCount(0);setTimer(0);}}
+                  style={{ background:"none", border:"1px solid #e5e3e0", color:"#78716c", borderRadius:9, padding:"11px 16px", cursor:"pointer", fontSize:13 }}>
+                  Re-record
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Feedback */
+          <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:14, padding:22 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <div style={{ fontSize:14, fontWeight:700, color:"#1c1917" }}>AI Feedback</div>
+              <span style={{ background:sColor(currentFeedback.strength)+"18", color:sColor(currentFeedback.strength), border:`1px solid ${sColor(currentFeedback.strength)}30`, borderRadius:6, padding:"4px 12px", fontWeight:700, fontSize:15 }}>
+                {currentFeedback.strength}/5
+              </span>
+            </div>
+
+            {/* STAR tags */}
+            <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginBottom:14 }}>
+              {["situation","task","action","result"].map(k=>(
+                <span key={k} style={{ background:currentFeedback.starScore?.[k]?"#dcfce7":"#fee2e2", color:currentFeedback.starScore?.[k]?"#16a34a":"#dc2626", border:`1px solid ${currentFeedback.starScore?.[k]?"#bbf7d0":"#fecaca"}`, borderRadius:4, padding:"2px 9px", fontSize:11, fontWeight:600 }}>
+                  {currentFeedback.starScore?.[k]?"✓":"✗"} {k[0].toUpperCase()+k.slice(1)}
+                </span>
+              ))}
+              <span style={{ background:currentFeedback.fillers>3?"#fee2e2":"#f0fdf4", color:currentFeedback.fillers>3?"#dc2626":"#16a34a", borderRadius:4, padding:"2px 9px", fontSize:11, fontWeight:600 }}>
+                {currentFeedback.fillers} fillers
+              </span>
+              <span style={{ background:"#f5f4f2", color:"#57534e", borderRadius:4, padding:"2px 9px", fontSize:11 }}>{fmtTime(currentFeedback.duration||0)}</span>
+            </div>
+
+            <div style={{ fontSize:13, color:"#44403c", lineHeight:1.65, marginBottom:12 }}>{currentFeedback.feedback}</div>
+            {currentFeedback.improvement && (
+              <div style={{ background:"#fef9c3", border:"1px solid #fde68a", borderRadius:8, padding:"10px 14px", fontSize:12, color:"#b45309", marginBottom:18 }}>
+                <strong>To improve:</strong> {currentFeedback.improvement}
+              </div>
+            )}
+            {btn(currentQ+1>=questions.length?"See Final Results →":`Next Question (${currentQ+2}/${questions.length}) →`, nextQuestion)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── SUMMARY ──
+  if (phase === "summary") {
+    const avg   = sessionAnswers.length ? +(sessionAnswers.reduce((s,a)=>s+(a.strength||3),0)/sessionAnswers.length).toFixed(1) : 0;
+    const fillers = sessionAnswers.reduce((s,a)=>s+(a.fillers||0),0);
+    const best  = [...sessionAnswers].sort((a,b)=>(b.strength||0)-(a.strength||0))[0];
+    const worst = [...sessionAnswers].sort((a,b)=>(a.strength||5)-(b.strength||5))[0];
+
+    return (
+      <div style={{ maxWidth:660 }}>
+        <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:14, padding:28, marginBottom:16 }}>
+          {/* Score header */}
+          <div style={{ textAlign:"center", marginBottom:26 }}>
+            <div style={{ fontSize:52, fontWeight:800, color:sColor(avg), lineHeight:1 }}>{avg}<span style={{ fontSize:20, color:"#a8a29e" }}>/5</span></div>
+            <div style={{ fontSize:16, fontWeight:700, color:"#1c1917", marginTop:6 }}>Session Complete</div>
+            <div style={{ fontSize:13, color:"#78716c", marginTop:3 }}>{jobInput.title}{jobInput.company?" @ "+jobInput.company:""}</div>
+          </div>
+
+          {/* Stats row */}
+          <div style={{ display:"flex", gap:10, justifyContent:"center", marginBottom:24 }}>
+            {[["Questions",sessionAnswers.length,"#1c1917"],["Avg Score",avg+"/5",sColor(avg)],["Filler Words",fillers,fillers>10?"#dc2626":"#16a34a"]].map(([l,v,c])=>(
+              <div key={l} style={{ background:"#fafaf9", borderRadius:10, padding:"14px 20px", textAlign:"center", flex:1 }}>
+                <div style={{ fontSize:22, fontWeight:700, color:c }}>{v}</div>
+                <div style={{ fontSize:11, color:"#78716c", marginTop:2 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Best / worst */}
+          {best && worst && best.question !== worst.question && (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:22 }}>
+              <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"14px 16px" }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#16a34a", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:6 }}>Strongest Answer</div>
+                <div style={{ fontSize:12, color:"#1c1917", lineHeight:1.5 }}>{best.question?.slice(0,90)}…</div>
+                <div style={{ fontSize:11, color:"#16a34a", marginTop:6, fontWeight:700 }}>{best.strength}/5</div>
+              </div>
+              <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"14px 16px" }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#dc2626", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:6 }}>Needs Work</div>
+                <div style={{ fontSize:12, color:"#1c1917", lineHeight:1.5 }}>{worst.question?.slice(0,90)}…</div>
+                <div style={{ fontSize:11, color:"#dc2626", marginTop:6, fontWeight:700 }}>{worst.strength}/5</div>
+              </div>
+            </div>
+          )}
+
+          {/* Per-answer list */}
+          <div style={{ borderTop:"1px solid #f0eeec", paddingTop:16 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#a8a29e", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>All Answers</div>
+            {sessionAnswers.map((a,i)=>(
+              <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", padding:"9px 0", borderBottom:i<sessionAnswers.length-1?"1px solid #f5f4f2":"none" }}>
+                <div style={{ flex:1 }}>
+                  <span style={{ background:a.type==="behavioral"?"#eff6ff":"#f3e8ff", color:a.type==="behavioral"?"#2563eb":"#7c3aed", borderRadius:4, padding:"1px 6px", fontSize:10, fontWeight:600, marginRight:6 }}>{a.type==="behavioral"?"B":"T"}</span>
+                  <span style={{ fontSize:12, color:"#44403c" }}>{a.question?.slice(0,80)}…</span>
+                  <div style={{ fontSize:11, color:"#a8a29e", marginTop:3, paddingLeft:24 }}>{a.fillers} fillers · {fmtTime(a.duration||0)}</div>
+                </div>
+                <span style={{ background:sColor(a.strength)+"18", color:sColor(a.strength), borderRadius:5, padding:"2px 9px", fontSize:12, fontWeight:700, flexShrink:0, marginLeft:12 }}>{a.strength}/5</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display:"flex", gap:10 }}>
+          {btn("Practice Again", ()=>{ setPhase("session"); setCurrentQ(0); setSessionAnswers([]); setCurrentFeedback(null); setLiveText(""); setTypedText(""); }, { bg:"#2563eb" })}
+          {btn("New Role", ()=>setPhase("setup"), { bg:"#fff", color:"#1c1917", outline:true })}
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(false);
@@ -2062,6 +2446,11 @@ export default function App() {
             {/* ── AI ASSISTANT ──────────────────────────────────────────────── */}
             {tab==="assistant" && (
               <AssistantChat showToast={showToast} profile={settings?.profile||{}} />
+            )}
+
+            {/* ── MOCK INTERVIEW ────────────────────────────────────────────── */}
+            {tab==="interview" && (
+              <MockInterviewStudio showToast={showToast} applications={applications} profile={settings?.profile||{}} />
             )}
 
             {/* ── SETTINGS ──────────────────────────────────────────────────── */}

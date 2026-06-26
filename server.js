@@ -2116,6 +2116,50 @@ app.post("/api/billing/webhook", express.raw({ type: "application/json" }), (req
 });
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// POST /api/interview/questions -- generate behavioral + technical questions
+app.post("/api/interview/questions", async (req, res) => {
+  const { job = {}, profile = {} } = req.body || {};
+  try {
+    const p = { ...settings.profile, ...profile };
+    const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const prompt = `You are an expert technical interviewer. Generate interview questions for this candidate.\n\nJob: ${job.title || "Data Scientist"} at ${job.company || "a tech company"}\nJob Description: ${(job.description || "").slice(0, 1200)}\nCandidate skills: ${(p.skills || []).slice(0, 15).join(", ")}\nYears experience: ${p.yearsExperience || "?"}\n\nGenerate exactly 8 questions:\n- Questions 1-5: Behavioral (STAR format, ask for specific examples)\n- Questions 6-8: Technical (based on the job skills and description)\n\nReturn ONLY a JSON array with no extra text:\n[\n  {"id":1,"type":"behavioral","question":"Tell me about a time when...","hint":"Focus on the impact you made"},\n  ...\n]`;
+    const resp = await client.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 1200,
+      temperature: 0.7,
+    });
+    const text = resp.choices[0]?.message?.content || "[]";
+    const match = text.match(/\[[\s\S]*\]/);
+    const questions = match ? JSON.parse(match[0]) : [];
+    res.json({ ok: true, questions });
+  } catch (err) {
+    log("error", "Interview questions failed", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/interview/feedback -- analyze a spoken/typed answer
+app.post("/api/interview/feedback", async (req, res) => {
+  const { question = "", answer = "", jobTitle = "" } = req.body || {};
+  try {
+    const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const prompt = `You are an expert interview coach. Evaluate this interview answer.\n\nQuestion: ${question}\nAnswer: ${answer}\nRole: ${jobTitle || "the role"}\n\nEvaluate and return ONLY JSON with no extra text:\n{\n  "strength": <1-5 integer>,\n  "starScore": {"situation": <true/false>, "task": <true/false>, "action": <true/false>, "result": <true/false>},\n  "feedback": "<2-3 sentence constructive feedback>",\n  "improvement": "<one specific concrete thing to improve next time>"\n}`;
+    const resp = await client.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 350,
+      temperature: 0.4,
+    });
+    const text = resp.choices[0]?.message?.content || "{}";
+    const match = text.match(/\{[\s\S]*\}/);
+    const result = match ? JSON.parse(match[0]) : { strength: 3, feedback: "Answer recorded.", starScore: {} };
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ ok: false, strength: 3, feedback: "Could not analyze -- answer saved.", starScore: {}, error: err.message });
+  }
+});
 app.get("*", (req, res) => {
   const index = path.join(clientBuild, "index.html");
   if (fs.existsSync(index)) return res.sendFile(index);
@@ -2316,4 +2360,5 @@ const server = app.listen(PORT, async () => {
   // Wire up new architecture after server is ready
   await bootstrap().catch(err => console.error("Bootstrap error:", err.message));
 });
+
 
