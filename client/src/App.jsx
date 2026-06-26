@@ -48,6 +48,7 @@ const NAV = [
   { id:"pipeline",     label:"Pipeline",      icon:"M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" },
   { id:"applications", label:"Applications",  icon:"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
   { id:"outreach",     label:"Outreach",      icon:"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" },
+  { id:"assistant",    label:"AI Assistant",  icon:"M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" },
   { id:"settings",     label:"Settings",      icon:"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
 ];
 
@@ -1126,6 +1127,218 @@ function OutreachPage({ showToast, profile }) {
   );
 }
 
+// ─── AI Assistant Chat ────────────────────────────────────────────────────────
+function AssistantChat({ showToast, profile }) {
+  const [messages, setMessages] = useState([
+    { role:"assistant", content:"👋 Hi! I'm your **JobPilot AI Assistant**.\n\nI can help you:\n- 🎯 **Score any job** against your profile — paste a job description or URL\n- 🧠 **Find skill gaps** and what to add to your resume\n- ✉️ **Write recruiter outreach** messages tailored to each role\n- 🗣️ **Prepare for interviews** with role-specific questions\n\nDrop a job URL here, paste a job description, or just ask me anything!", ts: Date.now() }
+  ]);
+  const [input, setInput]       = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [jobContext, setJobContext] = useState(null);
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages]);
+
+  const SUGGESTIONS = [
+    "Score this job for me",
+    "What skills am I missing?",
+    "Write a recruiter message",
+    "Help me prep for an interview",
+    "Tailor my resume for this role",
+  ];
+
+  async function send(text) {
+    const msg = (text || input).trim();
+    if (!msg || loading) return;
+    setInput("");
+    const userMsg = { role:"user", content:msg, ts:Date.now() };
+    const next = [...messages, userMsg];
+    setMessages(next);
+    setLoading(true);
+
+    // If it's a URL, score it first
+    const urlMatch = msg.match(/https?:\/\/\S+/);
+    if (urlMatch) {
+      setMessages(m => [...m, { role:"assistant", content:"🔍 Fetching and scoring that job...", ts:Date.now(), loading:true }]);
+      try {
+        const r = await apiFetch(`${API}/chat/score-url`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ url:urlMatch[0] }) }).then(r=>r.json());
+        if (r.ok) {
+          setJobContext(r.job);
+          setMessages(m => {
+            const filtered = m.filter(x=>!x.loading);
+            const bd = r.job.scoreBreakdown || {};
+            const matched = (bd.matchedSkills||[]).map(s=>`[SKILL:${s}]`).join(" ");
+            const missing = (bd.missingSkills||[]).map(s=>`[MISSING:${s}]`).join(" ");
+            const autoNote = `📊 **Auto-scored:** [SCORE:${r.job.score}] (${r.scoreLabel})\n**Jaccard:** ${bd.jaccardPct||"—"} · **TF-Cosine:** ${bd.cosinePct||"—"}\n${matched ? "✅ **Matched:** "+matched : ""}\n${missing ? "❌ **Missing:** "+missing : ""}`;
+            return [...filtered, { role:"system-info", content:autoNote, ts:Date.now() }];
+          });
+        }
+      } catch {}
+    }
+
+    try {
+      const resp = await apiFetch(`${API}/chat`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ messages:next, jobContext }),
+      });
+      if (!resp.ok) throw new Error("Chat API error");
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantMsg = { role:"assistant", content:"", ts:Date.now() };
+      setMessages(m => [...m.filter(x=>!x.loading), assistantMsg]);
+
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream:true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          try {
+            const evt = JSON.parse(line.slice(5).trim());
+            if (evt.type === "delta") {
+              assistantMsg = { ...assistantMsg, content: assistantMsg.content + evt.content };
+              setMessages(m => [...m.slice(0,-1), assistantMsg]);
+            }
+          } catch {}
+        }
+      }
+    } catch (err) {
+      setMessages(m => [...m.filter(x=>!x.loading), { role:"assistant", content:`⚠️ ${err.message}`, ts:Date.now() }]);
+    }
+    setLoading(false);
+    inputRef.current?.focus();
+  }
+
+  function onDrop(e) {
+    e.preventDefault();
+    setDragging(false);
+    const url  = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+    const text = e.dataTransfer.getData("text/plain");
+    const msg  = url?.startsWith("http") ? url : text;
+    if (msg) send(msg);
+  }
+
+  // Render a message bubble — handles markdown-like tags
+  function renderMsg(content) {
+    const parts = [];
+    let text = content
+      .replace(/\[SCORE:([\d.]+)\]/g, (_, v) => {
+        const c = parseFloat(v) >= 3.5 ? "#16a34a" : parseFloat(v) >= 2.5 ? "#d97706" : "#dc2626";
+        return `<span style="background:${c}20;color:${c};border:1px solid ${c}40;border-radius:6px;padding:2px 9px;font-weight:700;font-size:13px">${v}/5</span>`;
+      })
+      .replace(/\[SKILL:([^\]]+)\]/g, '<span style="background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;margin:0 2px">✓ $1</span>')
+      .replace(/\[MISSING:([^\]]+)\]/g, '<span style="background:#fee2e2;color:#dc2626;border:1px solid #fecaca;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;margin:0 2px">✗ $1</span>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code style="background:#f0eeec;border-radius:3px;padding:1px 5px;font-size:12px;font-family:monospace">$1</code>')
+      .replace(/\n/g, '<br/>');
+    return <span dangerouslySetInnerHTML={{ __html:text }} />;
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 56px)", maxWidth:860, margin:"0 auto" }}
+      onDragOver={e=>{ e.preventDefault(); setDragging(true); }}
+      onDragLeave={()=>setDragging(false)}
+      onDrop={onDrop}
+    >
+      {/* Drag overlay */}
+      {dragging && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(37,99,235,.15)", border:"3px dashed #2563eb", zIndex:999, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:12, pointerEvents:"none" }}>
+          <div style={{ fontSize:18, fontWeight:700, color:"#2563eb" }}>🔗 Drop job URL or text here to score it</div>
+        </div>
+      )}
+
+      {/* Job context banner */}
+      {jobContext && (
+        <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:8, padding:"8px 14px", margin:"8px 0 0", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+          <div style={{ fontSize:12, color:"#1d4ed8" }}>
+            <strong>📌 Job context:</strong> {jobContext.title || "Job"} {jobContext.company ? `@ ${jobContext.company}` : ""}
+            {jobContext.score !== undefined && <span style={{ marginLeft:8, background:"#2563eb", color:"#fff", borderRadius:4, padding:"1px 7px", fontSize:11, fontWeight:700 }}>{jobContext.score}/5</span>}
+          </div>
+          <button onClick={()=>setJobContext(null)} style={{ background:"none", border:"none", cursor:"pointer", color:"#93c5fd", fontSize:16, lineHeight:1 }}>×</button>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div style={{ flex:1, overflowY:"auto", padding:"16px 0", display:"flex", flexDirection:"column", gap:12 }}>
+        {messages.map((m, i) => {
+          const isUser  = m.role === "user";
+          const isInfo  = m.role === "system-info";
+          if (isInfo) return (
+            <div key={i} style={{ alignSelf:"stretch", background:"#f8faff", border:"1px solid #dbeafe", borderRadius:8, padding:"10px 14px", fontSize:12, color:"#1e40af", lineHeight:1.7 }}>
+              {renderMsg(m.content)}
+            </div>
+          );
+          return (
+            <div key={i} style={{ display:"flex", justifyContent:isUser?"flex-end":"flex-start", gap:8, alignItems:"flex-start" }}>
+              {!isUser && <div style={{ width:30, height:30, borderRadius:"50%", background:"#2563eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0, marginTop:2 }}>⚡</div>}
+              <div style={{
+                maxWidth:"78%", background: isUser ? "#2563eb" : "#fff",
+                color: isUser ? "#fff" : "#1c1917",
+                border: isUser ? "none" : "1px solid #e5e3e0",
+                borderRadius: isUser ? "18px 18px 4px 18px" : "4px 18px 18px 18px",
+                padding:"10px 14px", fontSize:13, lineHeight:1.65,
+                boxShadow:"0 1px 3px rgba(0,0,0,.06)",
+              }}>
+                {m.loading ? <span style={{ color:"#94a3b8" }}>●●●</span> : renderMsg(m.content)}
+              </div>
+              {isUser && <div style={{ width:30, height:30, borderRadius:"50%", background:"#f0eeec", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:"#78716c", flexShrink:0, marginTop:2 }}>
+                {(profile?.name||"U")[0].toUpperCase()}
+              </div>}
+            </div>
+          );
+        })}
+        {loading && !messages.some(m=>m.loading) && (
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <div style={{ width:30, height:30, borderRadius:"50%", background:"#2563eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚡</div>
+            <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:"4px 18px 18px 18px", padding:"10px 16px", color:"#94a3b8", fontSize:13 }}>●●●</div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Suggestion chips */}
+      {messages.length <= 2 && (
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", paddingBottom:8 }}>
+          {SUGGESTIONS.map(s => (
+            <button key={s} onClick={()=>send(s)} style={{ background:"#fafaf9", border:"1px solid #e5e3e0", borderRadius:20, padding:"5px 12px", fontSize:12, color:"#78716c", cursor:"pointer", fontWeight:500 }}>{s}</button>
+          ))}
+        </div>
+      )}
+
+      {/* Input bar */}
+      <div style={{ borderTop:"1px solid #e5e3e0", paddingTop:12, paddingBottom:8 }}>
+        <div style={{ display:"flex", gap:8, alignItems:"flex-end", background:"#fff", border:"1px solid #e5e3e0", borderRadius:12, padding:"8px 12px", boxShadow:"0 1px 4px rgba(0,0,0,.06)" }}>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e=>{ setInput(e.target.value); e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight,120)+"px"; }}
+            onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); } }}
+            placeholder="Ask anything… or drop a job URL / paste a job description"
+            disabled={loading}
+            rows={1}
+            style={{ flex:1, border:"none", outline:"none", resize:"none", fontSize:13, fontFamily:"inherit", lineHeight:1.5, background:"transparent", color:"#1c1917", minHeight:36 }}
+          />
+          <button
+            onClick={()=>send()}
+            disabled={loading || !input.trim()}
+            style={{ background:loading||!input.trim()?"#e5e3e0":"#2563eb", border:"none", borderRadius:8, padding:"7px 14px", color:loading||!input.trim()?"#a8a29e":"#fff", cursor:loading||!input.trim()?"not-allowed":"pointer", fontWeight:700, fontSize:13, transition:".15s" }}
+          >
+            {loading ? "…" : "Send →"}
+          </button>
+        </div>
+        <div style={{ fontSize:10, color:"#d6d3d1", textAlign:"center", marginTop:5 }}>Enter to send · Shift+Enter for newline · Drag job URLs here to score instantly</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(false);
@@ -1699,6 +1912,11 @@ export default function App() {
             {/* ── OUTREACH ──────────────────────────────────────────────────── */}
             {tab==="outreach" && (
               <OutreachPage showToast={showToast} profile={settings?.profile||{}} />
+            )}
+
+            {/* ── AI ASSISTANT ──────────────────────────────────────────────── */}
+            {tab==="assistant" && (
+              <AssistantChat showToast={showToast} profile={settings?.profile||{}} />
             )}
 
             {/* ── SETTINGS ──────────────────────────────────────────────────── */}

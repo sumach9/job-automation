@@ -17,6 +17,7 @@ import { generateViralImage } from "./imageGen.js";
 import { parseResume } from "./resumeParser.js";
 import { scrapeTickBig, invalidateTickBigToken } from "./tickbigScraper.js";
 import { syncToGoogleSheets, isSheetsConfigured } from "./src/integrations/googleSheets.js";
+import { registerChatRoutes } from "./src/chat.js";
 
 dotenv.config();
 
@@ -2255,6 +2256,8 @@ app.patch("/api/outreach/:index/connected", (req, res) => {
 });
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+registerChatRoutes(app, () => ({ settings, foundJobs, applications }));
 
 const PORT = process.env.PORT || 3004;
 const server = app.listen(PORT, async () => {
