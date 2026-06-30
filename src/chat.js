@@ -1,4 +1,4 @@
-// ── AI Chat Assistant — SeekOut-style agentic workflow for job seekers ─────────
+// ── SAM Assistant — agentic career workflow for job seekers ──────────────────
 // POST /api/chat           streaming SSE (text + structured step events)
 // POST /api/chat/score-url score a job URL against profile
 import Groq from "groq-sdk";
@@ -209,23 +209,52 @@ export function registerChatRoutes(app, getState) {
         systemPrompt = buildWorkflowPrompt(workflow, settings);
       } else {
         // ── Standard Q&A mode ─────────────────────────────────────────────────
+        const expLines = (p.experiences || []).slice(0, 5).map(e =>
+          `  • ${e.title || "Role"} @ ${e.company || "Company"} (${e.startDate || ""}–${e.endDate || "present"})\n    ${(e.description || "").slice(0, 200)}`
+        ).join("\n");
+
+        const eduLines = (p.education || []).slice(0, 3).map(e =>
+          `  • ${e.degree || "Degree"} in ${e.major || "field"} — ${e.school || "School"} (${e.endYear || ""})`
+        ).join("\n");
+
+        const isResumeRequest = /generate.*(resume|cv)|write.*resume|build.*resume|create.*resume|resume.*generate|my.*resume/i.test(lastMsg);
+
         systemPrompt = [
-          "You are JobPilot Assistant — an intelligent job search co-pilot for " + (p.name || "a job seeker") + ".",
+          "You are SAM — JobPilot's AI career assistant for " + (p.name || "a job seeker") + ".",
           "",
-          "PROFILE: " + (p.targetRoles || "Data Scientist") + " | " +
-            (p.yearsExperience||"?") + " yrs | " + (p.location||"Seattle, WA"),
-          "Skills: " + (p.skills||[]).slice(0,15).join(", "),
-          "Summary: " + (p.summary||"").slice(0,200),
+          "== CANDIDATE PROFILE ==",
+          "Name: " + (p.name || ""),
+          "Email: " + (p.email || "") + (p.phone ? " | Phone: " + p.phone : "") + (p.location ? " | Location: " + p.location : ""),
+          "Target Roles: " + (p.targetRoles || ""),
+          "Experience: " + (p.yearsExperience || "?") + " years",
+          "Skills: " + (p.skills || []).join(", "),
+          "Summary: " + (p.summary || ""),
+          expLines ? "\n== WORK HISTORY ==\n" + expLines : "",
+          eduLines ? "\n== EDUCATION ==\n" + eduLines : "",
+          (p.linkedinUrl ? "\nLinkedIn: " + p.linkedinUrl : ""),
           "",
-          "LIVE STATS: " + foundJobs.length + " jobs found | " +
+          "== LIVE STATS ==",
+          foundJobs.length + " jobs found | " +
             applications.filter(a=>a.status==="auto-applied").length + " auto-applied | " +
             applications.filter(a=>a.status==="interviewing").length + " interviewing",
-          jobContext ? "\nCURRENT JOB: " + JSON.stringify(jobContext) : "",
+          jobContext ? "\n== CURRENT JOB CONTEXT ==\n" + JSON.stringify(jobContext) : "",
           "",
-          "Help with: job scoring, skill gaps, resume tailoring, recruiter outreach, interview prep.",
-          "Use [SCORE:X.X] for scores, [SKILL:name] for matched, [MISSING:name] for missing.",
+          isResumeRequest
+            ? `== RESUME GENERATION INSTRUCTIONS ==
+Generate a complete, ATS-optimized resume for ${p.name || "the candidate"} in clean markdown format.
+Structure:
+1. Header: Name, email, phone, location, LinkedIn
+2. Professional Summary (3-4 sentences, keyword-rich)
+3. Skills (grouped: Languages, Frameworks, Tools, Cloud)
+4. Work Experience (each role: title, company, dates, 4-5 STAR bullet points with metrics)
+5. Education
+6. Certifications (if any in the profile)
+Make it specific, metric-driven, and tailored to ${jobContext?.title ? "the " + jobContext.title + " role" : "their target role"}.
+Use strong action verbs. Format in valid markdown. Start with the candidate's name as H1.`
+            : "Help with: job scoring, skill gaps, resume tailoring, recruiter outreach, interview prep.",
+          "Use [SCORE:X.X] for scores, [SKILL:name] for matched, [MISSING:name] for missing skills.",
           "Be concise and actionable. Use markdown.",
-        ].join("\n");
+        ].filter(Boolean).join("\n");
 
         // Auto-score pasted JDs
         if (lastMsg.length > 300 && /responsibilities|qualifications|requirements|we are looking/i.test(lastMsg)) {

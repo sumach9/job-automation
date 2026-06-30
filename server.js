@@ -18,6 +18,7 @@ import { parseResume } from "./resumeParser.js";
 import { scrapeTickBig, invalidateTickBigToken } from "./tickbigScraper.js";
 import { syncToGoogleSheets, isSheetsConfigured } from "./src/integrations/googleSheets.js";
 import { registerChatRoutes } from "./src/chat.js";
+import Groq from "groq-sdk";
 
 dotenv.config();
 
@@ -1353,6 +1354,84 @@ app.post("/api/generate-resume", (req, res) => {
   }
 });
 
+// POST /api/generate-cover-letter — personalised cover letter for a job
+app.post("/api/generate-cover-letter", (req, res) => {
+  try {
+    const { job = {} } = req.body;
+    const p = settings.profile || {};
+    const name    = p.name    || "Your Name";
+    const email   = p.email   || "";
+    const phone   = p.phone   || "";
+    const linkedin = p.linkedinUrl || "";
+    const title   = job.title   || "this role";
+    const company = job.company || "your company";
+    const yrs     = parseInt(p.yearsExperience, 10) || 0;
+    const desc    = (job.description || "").toLowerCase();
+    const skills  = Array.isArray(p.skills) ? p.skills : (p.skills||"").split(",").map(s=>s.trim()).filter(Boolean);
+    const matched = skills.filter(s => desc.includes(s.toLowerCase())).slice(0, 5);
+    const top2    = matched.slice(0, 2);
+    const today   = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+    const contactLine = [email, phone, linkedin].filter(Boolean).join("  ·  ");
+
+    const letter = `${today}
+
+Dear Hiring Manager,
+
+I am writing to express my strong interest in the ${title} position at ${company}. With ${yrs > 0 ? yrs + "+ years of experience" : "hands-on experience"}${top2.length > 0 ? " in " + top2.join(" and ") : ""}, I am excited about the opportunity to contribute to your team.
+
+${p.summary ? p.summary + "\n\n" : ""}Your posting for a ${title} closely aligns with my background. ${matched.length > 0 ? "I have deep hands-on experience with " + matched.slice(0,4).join(", ") + ", and have consistently applied these skills to deliver measurable business impact. " : ""}I thrive in collaborative, fast-moving environments and take pride in delivering reliable, scalable solutions.
+
+I am particularly drawn to ${company} because of its focus on innovation and impact. I would welcome the opportunity to bring my skills to your team and contribute to your continued success.
+
+Thank you for your time and consideration. I look forward to the opportunity to discuss how I can contribute to ${company}.
+
+Sincerely,
+${name}${contactLine ? "\n" + contactLine : ""}`;
+
+    res.json({ ok: true, letter });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/find-hiring-manager — generate email patterns + search links
+app.post("/api/find-hiring-manager", (req, res) => {
+  try {
+    const { company = "", firstName = "", lastName = "", role = "Hiring Manager" } = req.body;
+    if (!company) return res.status(400).json({ ok:false, error:"Company name required" });
+
+    // Derive domain from company name (best-effort)
+    const domainGuess = company
+      .toLowerCase()
+      .replace(/\b(inc|llc|ltd|corp|co|the)\b/g,"")
+      .replace(/[^a-z0-9]/g,"")
+      .trim();
+    const domain = `${domainGuess}.com`;
+
+    const fn = firstName.toLowerCase().trim();
+    const ln = lastName.toLowerCase().trim();
+    const fi = fn ? fn[0] : "";
+
+    const patterns = fn && ln ? [
+      { pattern:`${fn}.${ln}@${domain}`,     label:"First.Last (most common)" },
+      { pattern:`${fi}${ln}@${domain}`,       label:"FLast" },
+      { pattern:`${fn}@${domain}`,            label:"First only" },
+      { pattern:`${fi}.${ln}@${domain}`,      label:"F.Last" },
+      { pattern:`${ln}.${fn}@${domain}`,      label:"Last.First" },
+      { pattern:`${fn}${ln}@${domain}`,       label:"FirstLast" },
+    ] : [];
+
+    const linkedinUrl  = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(company+" "+role)}&origin=GLOBAL_SEARCH_HEADER`;
+    const hunterUrl    = `https://hunter.io/find?domain=${domain}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}`;
+    const apolloUrl    = `https://app.apollo.io/#/people?organizationNames[]=${encodeURIComponent(company)}`;
+    const rocketUrl    = `https://www.rocketreach.co/search?start=1&pageSize=10&keyword=${encodeURIComponent(company+" "+role)}`;
+
+    res.json({ ok:true, domain, patterns, linkedinUrl, hunterUrl, apolloUrl, rocketUrl });
+  } catch (err) {
+    res.status(500).json({ ok:false, error:err.message });
+  }
+});
+
 function generateTailoredResume(job, profile) {
   const title       = job.title || "this role";
   const company     = job.company || "the company";
@@ -2160,11 +2239,6 @@ app.post("/api/interview/feedback", async (req, res) => {
     res.status(500).json({ ok: false, strength: 3, feedback: "Could not analyze -- answer saved.", starScore: {}, error: err.message });
   }
 });
-app.get("*", (req, res) => {
-  const index = path.join(clientBuild, "index.html");
-  if (fs.existsSync(index)) return res.sendFile(index);
-  res.status(404).send("Frontend not built. Run `npm run build` inside /client.");
-});
 
 function sanitizeSettings(s) {
   const { emailPass, apifyToken, serpApiKey, linkedinPassword, tickbigPassword, ...safe } = s;
@@ -2352,6 +2426,12 @@ app.patch("/api/outreach/:index/connected", (req, res) => {
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+// Serve React SPA for all non-API routes
+app.get("*", (req, res) => {
+  const index = path.join(clientBuild, "index.html");
+  if (fs.existsSync(index)) return res.sendFile(index);
+  res.status(404).send("Frontend not built. Run `npm run build` inside /client.");
+});
 registerChatRoutes(app, () => ({ settings, foundJobs, applications }));
 
 const PORT = process.env.PORT || 3004;
@@ -2360,5 +2440,6 @@ const server = app.listen(PORT, async () => {
   // Wire up new architecture after server is ready
   await bootstrap().catch(err => console.error("Bootstrap error:", err.message));
 });
+
 
 

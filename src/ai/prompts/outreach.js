@@ -70,7 +70,11 @@ Return only valid JSON.`;
 
   try {
     const raw = await aiRouter.complete(prompt, { maxTokens: 300 });
-    return JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const jsonStr = cleaned.match(/\{[\s\S]*\}/)?.[0] || "{}";
+    const result = JSON.parse(jsonStr);
+    if (!result.matched && !result.missing) return { matched: [], missing: [], score: 0, summary: "Analysis unavailable" };
+    return result;
   } catch {
     return { matched: [], missing: [], score: 0, summary: "Analysis unavailable" };
   }

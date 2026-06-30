@@ -1,12 +1,67 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #0f172a;
-  color: #e2e8f0;
-  min-height: 100vh;
+/* ── Design Tokens ── */
+:root {
+  --bg:       #ffffff;
+  --bg-2:     #fafafa;
+  --bg-3:     #f4f4f5;
+  --bg-4:     #ebebeb;
+  --bg-5:     #e4e4e7;
+  --border:   rgba(0,0,0,0.07);
+  --border-2: rgba(0,0,0,0.11);
+  --border-3: rgba(0,0,0,0.18);
+  --text:     #09090b;
+  --text-2:   #52525b;
+  --text-3:   #71717a;
+  --purple:   #18181b;
+  --purple-2: #09090b;
+  --purple-l: #3f3f46;
+  --cyan:     #27272a;
+  --green:    #16a34a;
+  --red:      #dc2626;
+  --amber:    #d97706;
+  --radius:   12px;
+  --radius-sm:8px;
+  --shadow:   0 4px 24px rgba(0,0,0,0.1);
+  --transition: 0.2s cubic-bezier(0.4,0,0.2,1);
 }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #1e293b; }
-::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+
+::selection { background: rgba(0,0,0,0.12); }
+
+/* ── Animations ── */
+@keyframes spin    { to { transform: rotate(360deg); } }
+@keyframes fadeUp  { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+@keyframes pulse   { 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
+@keyframes blobA   { 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(40px,-30px) scale(1.08); } }
+@keyframes blobB   { 0%,100%{ transform:translate(0,0) scale(1); } 50%{ transform:translate(-30px,40px) scale(1.06); } }
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+@keyframes floatY  { 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-10px); } }
+@keyframes marquee { from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
+
+/* ── Global form focus ── */
+input:focus, textarea:focus, select:focus {
+  border-color: #18181b !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.08) !important;
+}
+
+/* ── Card base ── */
+.jp-card {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+}
