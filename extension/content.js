@@ -535,6 +535,225 @@ async function fetchTailoredAnswers(job, profile) {
   } catch { return null; }
 }
 
+// ── SAM AI assistant ──────────────────────────────────────────────────────────
+const _samBtnSet = new WeakSet(); // tracks textareas that already have a SAM button
+let   _samPanel  = null;
+
+async function askSam(question, job, profile) {
+  try {
+    const res = await fetch(`${API_BASE}/ask-sam`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, job, profile }),
+    });
+    const d = await res.json();
+    return d.ok ? d.answer : null;
+  } catch { return null; }
+}
+
+// Inject a small "Ask SAM" button directly below a textarea
+function injectSamButton(textarea, job) {
+  if (_samBtnSet.has(textarea)) return;
+  if (!textarea.offsetParent) return;
+  const label = getLabelText(textarea);
+  if (!label || label.length < 4) return;
+
+  _samBtnSet.add(textarea);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ot-sam-inline-btn";
+  btn.innerHTML = `<span>✨</span> Ask SAM`;
+  btn.title = `AI answer for: "${label}"`;
+
+  let busy = false;
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    busy = true;
+    btn.innerHTML = `<span class="ot-sam-spin">⏳</span> Thinking…`;
+    btn.disabled  = true;
+
+    const profile = await getProfile();
+    const answer  = await askSam(label, job, profile);
+
+    busy = false;
+    btn.innerHTML = `<span>✨</span> Ask SAM`;
+    btn.disabled  = false;
+
+    if (answer) {
+      setNativeValue(textarea, answer);
+      textarea.focus();
+      showToast(`✨ SAM filled the field!`, "success", 2500);
+    } else {
+      showToast("⚠ SAM couldn't generate an answer", "error", 2000);
+    }
+  });
+
+  // Place the button directly after the textarea in DOM
+  if (textarea.nextSibling) {
+    textarea.parentNode.insertBefore(btn, textarea.nextSibling);
+  } else {
+    textarea.parentNode.appendChild(btn);
+  }
+}
+
+// Inject SAM buttons on all visible, unlabeled-free textareas on the page
+function injectAllSamButtons(job) {
+  for (const area of document.querySelectorAll("textarea")) {
+    if (area.offsetParent) injectSamButton(area, job);
+  }
+  // Re-run as new fields appear (SPA step forms)
+  const obs = new MutationObserver(() => {
+    for (const area of document.querySelectorAll("textarea")) {
+      if (area.offsetParent && !_samBtnSet.has(area)) injectSamButton(area, job);
+    }
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
+}
+
+// Fill all unfilled textareas with SAM during OneTouch Apply
+async function fillWithSam(root, job) {
+  const profile = await getProfile();
+  let filled = 0;
+  for (const area of root.querySelectorAll("textarea")) {
+    if (!area.offsetParent || area.value || area.readOnly) continue;
+    const label = getLabelText(area);
+    if (!label || label.length < 4) continue;
+    if (inferValue(label, profile)) continue; // already handled by main fill loop
+    const answer = await askSam(label, job, profile);
+    if (answer) { setNativeValue(area, answer); filled++; await sleep(120); }
+  }
+  return filled;
+}
+
+// ── SAM floating side panel ───────────────────────────────────────────────────
+function buildSamPanel(job) {
+  if (_samPanel) { _samPanel.remove(); _samPanel = null; }
+
+  const panel = document.createElement("div");
+  panel.id = "ot-sam-panel";
+  panel.innerHTML = `
+    <div id="ot-sam-panel-header">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">🤖</span>
+        <div>
+          <div style="font-weight:700;font-size:13px">SAM Assistant</div>
+          <div style="font-size:10px;opacity:.6">AI form-filling copilot</div>
+        </div>
+      </div>
+      <button id="ot-sam-panel-close" title="Close">✕</button>
+    </div>
+    <div id="ot-sam-panel-body">
+      <div id="ot-sam-questions-list"><div class="ot-sam-hint">Scanning for questions…</div></div>
+      <button id="ot-sam-fill-all" class="ot-sam-fill-all-btn">✨ Generate &amp; Fill All Answers</button>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+  _samPanel = panel;
+
+  panel.querySelector("#ot-sam-panel-close").addEventListener("click", () => {
+    panel.remove(); _samPanel = null;
+    const toggle = document.getElementById("ot-sam-toggle");
+    if (toggle) toggle.classList.remove("ot-sam-toggle-active");
+  });
+
+  // Scan for questions
+  const list = panel.querySelector("#ot-sam-questions-list");
+  const areas = [...document.querySelectorAll("textarea,input[type='text']")]
+    .filter(el => el.offsetParent && !el.readOnly && !el.disabled);
+
+  const questions = areas.map(el => ({ el, label: getLabelText(el) }))
+    .filter(({ label }) => label && label.length >= 4);
+
+  if (questions.length === 0) {
+    list.innerHTML = `<div class="ot-sam-hint">No text fields detected on this page.</div>`;
+  } else {
+    list.innerHTML = questions.map((_, i) => `
+      <div class="ot-sam-q-row" data-idx="${i}">
+        <div class="ot-sam-q-label">${questions[i].label.slice(0, 80)}</div>
+        <div class="ot-sam-q-answer" id="ot-sam-ans-${i}"></div>
+        <div class="ot-sam-q-actions">
+          <button class="ot-sam-gen-btn" data-idx="${i}">✨ Generate</button>
+          <button class="ot-sam-ins-btn" data-idx="${i}" style="display:none">⬇ Insert</button>
+        </div>
+      </div>
+    `).join("");
+
+    // Wire up Generate buttons
+    list.querySelectorAll(".ot-sam-gen-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const idx  = +btn.dataset.idx;
+        const { el, label } = questions[idx];
+        const ansDiv = document.getElementById(`ot-sam-ans-${idx}`);
+        const insBtn = list.querySelector(`.ot-sam-ins-btn[data-idx="${idx}"]`);
+        btn.textContent = "…";
+        btn.disabled = true;
+        ansDiv.className = "ot-sam-q-answer ot-sam-q-answer-loading";
+        ansDiv.textContent = "Asking SAM…";
+
+        const profile = await getProfile();
+        const answer  = await askSam(label, job, profile);
+
+        btn.textContent = "✨ Regenerate";
+        btn.disabled = false;
+
+        if (answer) {
+          ansDiv.className = "ot-sam-q-answer ot-sam-q-answer-done";
+          ansDiv.textContent = answer;
+          ansDiv.dataset.answer = answer;
+          ansDiv.dataset.elIdx  = idx;
+          insBtn.style.display = "";
+          insBtn.onclick = () => {
+            setNativeValue(el, answer);
+            el.focus();
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            showToast("✨ Answer inserted!", "success", 1800);
+          };
+        } else {
+          ansDiv.className = "ot-sam-q-answer ot-sam-q-answer-err";
+          ansDiv.textContent = "SAM couldn't generate an answer.";
+        }
+      });
+    });
+  }
+
+  // "Fill All" button
+  panel.querySelector("#ot-sam-fill-all").addEventListener("click", async () => {
+    const allGen = [...list.querySelectorAll(".ot-sam-gen-btn:not([disabled])")];
+    for (const btn of allGen) {
+      btn.click();
+      await sleep(400); // stagger calls
+    }
+  });
+
+  return panel;
+}
+
+function toggleSamPanel(job) {
+  if (_samPanel) {
+    _samPanel.remove(); _samPanel = null;
+    const toggle = document.getElementById("ot-sam-toggle");
+    if (toggle) toggle.classList.remove("ot-sam-toggle-active");
+  } else {
+    buildSamPanel(job);
+    const toggle = document.getElementById("ot-sam-toggle");
+    if (toggle) toggle.classList.add("ot-sam-toggle-active");
+  }
+}
+
+function injectSamToggleButton(job) {
+  if (document.getElementById("ot-sam-toggle")) return;
+  const btn = document.createElement("button");
+  btn.id    = "ot-sam-toggle";
+  btn.title = "Open SAM AI Assistant";
+  btn.innerHTML = `🤖`;
+  btn.addEventListener("click", () => toggleSamPanel(job));
+  document.body.appendChild(btn);
+}
+
 // ── Master apply handler ──────────────────────────────────────────────────────
 async function oneTouchApply(job) {
   if (isFillingNow) return;
@@ -567,6 +786,12 @@ async function oneTouchApply(job) {
     if (SITE === "linkedin")     filled = await handleLinkedIn(job);
     else if (SITE === "workday") filled = await handleWorkday(job);
     else                         filled = await fillForms();
+
+    // Phase 2: Ask SAM to fill any remaining text questions the rule engine couldn't handle
+    setButtonState("loading", "SAM filling extras…");
+    showToast("🤖 SAM answering custom questions…", "info", 2500);
+    const samFilled = await fillWithSam(document, job);
+    filled += samFilled;
 
     window.__otProfileOverride = origGet;
 
@@ -838,7 +1063,9 @@ function tryInit() {
     if (!isJobPage()) return;
 
     const job = scrapeJobData();
-    injectButton(job);       // show button even if title is empty
+    injectButton(job);            // show button even if title is empty
+    injectSamToggleButton(job);   // show 🤖 SAM toggle button
+    injectAllSamButtons(job);     // inject ✨ Ask SAM on all textareas
     if (job.title) injectScoreBadge(job);
   }, 800);
 }
@@ -848,6 +1075,9 @@ new MutationObserver(() => {
   if (location.href !== _lastUrl) {
     _lastUrl = location.href;
     document.getElementById("onetouch-btn")?.remove();
+    document.getElementById("ot-sam-toggle")?.remove();
+    document.getElementById("ot-sam-panel")?.remove();
+    _samPanel = null;
     otBtn = null;
     tryInit();
   } else {

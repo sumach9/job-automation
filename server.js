@@ -46,6 +46,8 @@ app.post("/api/auth/login", (req, res) => {
 app.use("/api", (req, res, next) => {
   if (req.path === "/auth/login")       return next(); // already handled above
   if (req.path === "/billing/webhook")  return next(); // Stripe signs its own requests
+  // Extension content-script endpoints — no session cookie available in service workers
+  if (req.path === "/ask-sam" || req.path === "/generate-answers" || req.path === "/onetouch-apply") return next();
   const header = req.headers.authorization || "";
   const token  = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return res.status(401).json({ ok: false, message: "Unauthorized â€” please log in" });
@@ -1429,6 +1431,47 @@ app.post("/api/find-hiring-manager", (req, res) => {
     res.json({ ok:true, domain, patterns, linkedinUrl, hunterUrl, apolloUrl, rocketUrl });
   } catch (err) {
     res.status(500).json({ ok:false, error:err.message });
+  }
+});
+
+// POST /api/ask-sam — LLM answers a single form question using the applicant's profile
+// Called by the Chrome extension for any question inferValue() can't handle
+app.post("/api/ask-sam", async (req, res) => {
+  const { question = "", job = {}, profile = {} } = req.body;
+  if (!question.trim()) return res.status(400).json({ ok: false, error: "No question provided" });
+  try {
+    const p = { ...settings.profile, ...profile };
+    const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+    const skillStr  = Array.isArray(p.skills) ? p.skills.slice(0, 10).join(", ") : (p.skills || "");
+    const yrs       = parseInt(p.yearsExperience, 10) || 0;
+    const prompt = [
+      `You are helping ${p.name || "a job applicant"} fill out a job application.`,
+      ``,
+      `Job: ${job.title || "Software Engineer"} at ${job.company || "a tech company"}`,
+      job.description ? `Job description excerpt: ${job.description.slice(0, 400)}` : "",
+      p.summary       ? `Applicant summary: ${p.summary}` : "",
+      yrs > 0         ? `Years of experience: ${yrs}` : "",
+      skillStr        ? `Skills: ${skillStr}` : "",
+      ``,
+      `Answer this application form question in FIRST PERSON, naturally and concisely (2-4 sentences). Do not start with "I" every sentence. Be specific and professional.`,
+      ``,
+      `Question: "${question.trim()}"`,
+      ``,
+      `Answer:`,
+    ].filter(Boolean).join("\n");
+
+    const resp = await client.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 280,
+      temperature: 0.55,
+    });
+    const answer = (resp.choices[0]?.message?.content || "").trim();
+    res.json({ ok: true, answer });
+  } catch (err) {
+    log("warn", "ask-sam failed", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
