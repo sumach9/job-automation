@@ -198,6 +198,112 @@ function StatCard({ label, value, sub, accent="#18181b" }) {
   );
 }
 
+// --- Shared Resume View -------------------------------------------------------
+function ResumeView({ resume, onRegenerate }) {
+  if (!resume) return null;
+  const contactParts = [resume.email, resume.phone, resume.location, resume.linkedinUrl, resume.github].filter(Boolean);
+
+  function copyText() {
+    const lines = [
+      resume.name,
+      contactParts.join(" · "),
+      "",
+      "SUMMARY",
+      resume.tailoredSummary,
+      "",
+      "TECHNICAL SKILLS",
+      resume.orderedSkills?.join(", "),
+      "",
+      "EXPERIENCE HIGHLIGHTS",
+      ...(resume.experienceBullets || []).map(b => `• ${b}`),
+      "",
+      "EDUCATION",
+      resume.education?.degree,
+      resume.education?.school,
+    ].filter(l => l != null).join("\n");
+    navigator.clipboard.writeText(lines);
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <span style={{ fontSize:11, fontWeight:700, color:"#a8a29e", textTransform:"uppercase", letterSpacing:1 }}>
+          Tailored for {resume.targetTitle}{resume.targetCompany ? ` @ ${resume.targetCompany}` : ""}
+        </span>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={copyText} style={{ padding:"5px 13px", background:"#f4f4f5", color:"#57534e", border:"1px solid #e5e3e0", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Copy</button>
+          {onRegenerate && (
+            <button onClick={onRegenerate} style={{ padding:"5px 13px", background:"#6c47ff10", color:"#6c47ff", border:"1px solid #6c47ff30", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Regenerate</button>
+          )}
+        </div>
+      </div>
+      <div style={{ background:"#fff", border:"1px solid #e5e3e0", borderRadius:12, overflow:"hidden" }}>
+        {/* CV header */}
+        <div style={{ background:"linear-gradient(135deg,#6c47ff,#8b5cf6)", padding:"18px 22px", color:"#fff" }}>
+          <div style={{ fontSize:17, fontWeight:800, fontFamily:"'Syne',sans-serif", marginBottom:4 }}>{resume.name}</div>
+          <div style={{ fontSize:11, opacity:.85, lineHeight:1.7 }}>{contactParts.join(" · ")}</div>
+          {resume.seniority && (
+            <div style={{ marginTop:8, display:"inline-block", background:"#ffffff25", borderRadius:20, padding:"3px 12px", fontSize:11, fontWeight:600 }}>
+              {resume.seniority} {resume.targetTitle}
+            </div>
+          )}
+        </div>
+        <div style={{ padding:"16px 20px", display:"flex", flexDirection:"column", gap:14 }}>
+          {resume.tailoredSummary && (
+            <div>
+              <div style={{ fontSize:10, fontWeight:800, color:"#6c47ff", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>Professional Summary</div>
+              <div style={{ fontSize:13, color:"#3f3f46", lineHeight:1.75 }}>{resume.tailoredSummary}</div>
+            </div>
+          )}
+          {resume.orderedSkills?.length > 0 && (
+            <div>
+              <div style={{ fontSize:10, fontWeight:800, color:"#6c47ff", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>Technical Skills</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+                {resume.orderedSkills.map((s, i) => {
+                  const isMatch = resume.matchedSkills?.includes(s);
+                  return (
+                    <span key={i} style={{
+                      background: isMatch ? "#dcfce7" : "#f4f4f5",
+                      color:      isMatch ? "#16a34a" : "#3f3f46",
+                      border:     `1px solid ${isMatch ? "#bbf7d0" : "#e4e4e7"}`,
+                      borderRadius:4, padding:"3px 8px", fontSize:11, fontWeight:500,
+                    }}>{isMatch ? "✓ " : ""}{s}</span>
+                  );
+                })}
+              </div>
+              {resume.missingSkills?.length > 0 && (
+                <div style={{ marginTop:8, fontSize:11, color:"#a8a29e" }}>
+                  Skills in JD to consider adding:{" "}
+                  {resume.missingSkills.slice(0, 5).map((s, i) => (
+                    <span key={i} style={{ background:"#fff7ed", color:"#ea580c", border:"1px solid #fed7aa", borderRadius:4, padding:"2px 6px", fontSize:11, marginLeft:4 }}>{s}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {resume.experienceBullets?.length > 0 && (
+            <div>
+              <div style={{ fontSize:10, fontWeight:800, color:"#6c47ff", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>Experience Highlights</div>
+              <ul style={{ paddingLeft:16, margin:0, display:"flex", flexDirection:"column", gap:7 }}>
+                {resume.experienceBullets.map((b, i) => (
+                  <li key={i} style={{ fontSize:13, color:"#3f3f46", lineHeight:1.65 }}>{b}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(resume.education?.school || resume.education?.degree) && (
+            <div>
+              <div style={{ fontSize:10, fontWeight:800, color:"#6c47ff", textTransform:"uppercase", letterSpacing:1.5, marginBottom:6 }}>Education</div>
+              <div style={{ fontWeight:600, fontSize:13, color:"#3f3f46" }}>{resume.education.degree}</div>
+              {resume.education.school && <div style={{ fontSize:12, color:"#71717a", marginTop:2 }}>{resume.education.school}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Job Detail Panel (right-pane) --------------------------------------------
 function JobDetailPanel({ job, onApply, onClose }) {
   const [activeTab, setActiveTab] = useState("overview");
@@ -498,32 +604,30 @@ function JobDetailPanel({ job, onApply, onClose }) {
 
         {activeTab==="resume" && (
           <div>
-            {loadingResume && <div style={{ textAlign:"center", color:"#a8a29e", padding:40 }}>Generating resume draft�</div>}
+            {loadingResume && (
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14, padding:"48px 0" }}>
+                <div style={{ width:36, height:36, border:"3px solid #e5e3e0", borderTopColor:"#6c47ff", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+                <span style={{ color:"#a8a29e", fontSize:13 }}>Tailoring your resume...</span>
+              </div>
+            )}
             {!loadingResume && !resume && (
-              <div style={{ textAlign:"center", padding:40 }}>
-                <button onClick={loadResume} style={{ padding:"9px 20px", background:"#6c47ff", color:"#fff", border:"none", borderRadius:8, fontWeight:600, cursor:"pointer" }}>
-                  Generate Resume Draft
-                </button>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:16, padding:"48px 0" }}>
+                <div style={{ width:56, height:56, borderRadius:16, background:"linear-gradient(135deg,#6c47ff15,#8b5cf615)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="#6c47ff" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                </div>
+                <div style={{ textAlign:"center" }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:"#1c1917", marginBottom:6 }}>AI Resume Builder</div>
+                  <div style={{ fontSize:12, color:"#a8a29e", maxWidth:260 }}>Generates a tailored CV draft for {job.title} at {job.company}, highlighting your matched skills</div>
+                </div>
+                <button onClick={loadResume} style={{
+                  padding:"10px 24px", background:"linear-gradient(135deg,#6c47ff,#8b5cf6)", color:"#fff",
+                  border:"none", borderRadius:9, fontWeight:700, fontSize:13, cursor:"pointer",
+                }}>Generate Tailored Resume</button>
               </div>
             )}
-            {resume && (
-              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                {resume.summary && (
-                  <div>
-                    <div style={{ fontSize:11, color:"#a8a29e", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Summary</div>
-                    <div style={{ background:"#fafaf9", border:"1px solid #e5e3e0", borderRadius:10, padding:"12px 14px", fontSize:13, color:"#57534e", lineHeight:1.7 }}>{resume.summary}</div>
-                  </div>
-                )}
-                {resume.bullets?.length > 0 && (
-                  <div>
-                    <div style={{ fontSize:11, color:"#a8a29e", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Key Points</div>
-                    <ul style={{ paddingLeft:18, display:"flex", flexDirection:"column", gap:6 }}>
-                      {resume.bullets.map((b,i) => <li key={i} style={{ fontSize:13, color:"#57534e", lineHeight:1.6 }}>{b}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
+            {!loadingResume && resume && <ResumeView resume={resume} onRegenerate={loadResume}/>}
           </div>
         )}
 
@@ -2155,8 +2259,26 @@ function AssistantChat({ showToast, profile }) {
   const [steps, setSteps]         = useState([]);
   const [wfData, setWfData]       = useState(null);
   const [jobCtx, setJobCtx]       = useState(null);
+  const [samMode, setSamMode]     = useState("chat");
+  const [rJob, setRJob]           = useState({ title:"", company:"", description:"" });
+  const [rResume, setRResume]     = useState(null);
+  const [rLoading, setRLoading]   = useState(false);
   const bottomRef = useRef(null);
   const textaRef  = useRef(null);
+
+  async function generateSamResume() {
+    if (!rJob.title) { showToast("Enter a job title first", "error"); return; }
+    setRLoading(true); setRResume(null);
+    try {
+      const d = await apiFetch(`${API}/generate-resume`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ job: rJob }),
+      }).then(r => r.json());
+      if (d.ok) setRResume(d);
+      else showToast(d.error || "Failed to generate", "error");
+    } catch { showToast("Resume generation failed", "error"); }
+    setRLoading(false);
+  }
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages]);
 
@@ -2234,22 +2356,81 @@ function AssistantChat({ showToast, profile }) {
   return (
     <div style={{ height:"100%", display:"flex", flexDirection:"column", background:"#fff" }}>
       {/* Header */}
-      <div style={{ padding:"16px 24px", borderBottom:"1px solid #f0eeec", display:"flex", alignItems:"center", gap:12 }}>
-        <div style={{ width:36, height:36, borderRadius:10, background:"linear-gradient(135deg,#6c47ff,#8b5cf6)", display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+      <div style={{ padding:"16px 24px", borderBottom:"1px solid #f0eeec" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:12 }}>
+          <div style={{ width:36, height:36, borderRadius:10, background:"linear-gradient(135deg,#6c47ff,#8b5cf6)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+          </div>
+          <div>
+            <div style={{ fontSize:14, fontWeight:700, color:"#09090b" }}>SAM Assistant</div>
+            <div style={{ fontSize:11, color:"#a8a29e" }}>AI career co-pilot · powered by Groq</div>
+          </div>
+          <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
+            <div style={{ width:7, height:7, borderRadius:"50%", background:"#16a34a" }}/>
+            <span style={{ fontSize:11, color:"#71717a" }}>Online</span>
+          </div>
         </div>
-        <div>
-          <div style={{ fontSize:14, fontWeight:700, color:"#09090b" }}>SAM Assistant</div>
-          <div style={{ fontSize:11, color:"#a8a29e" }}>AI career co-pilot · powered by Groq</div>
-        </div>
-        <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{ width:7, height:7, borderRadius:"50%", background:"#16a34a" }}/>
-          <span style={{ fontSize:11, color:"#71717a" }}>Online</span>
+        {/* Mode tabs */}
+        <div style={{ display:"flex", gap:4 }}>
+          {[["chat","💬 Chat"],["resume","📄 Resume Builder"]].map(([m,lbl]) => (
+            <button key={m} onClick={() => setSamMode(m)} style={{
+              padding:"6px 14px", borderRadius:7, border:"none", cursor:"pointer", fontSize:12, fontWeight:600,
+              background: samMode===m ? "#6c47ff" : "#f4f4f5",
+              color:      samMode===m ? "#fff"    : "#71717a",
+            }}>{lbl}</button>
+          ))}
         </div>
       </div>
 
-      {/* Messages */}
-      <div style={{ flex:1, overflowY:"auto", padding:"20px 24px", display:"flex", flexDirection:"column", gap:16 }}>
+      {/* Resume Builder Panel */}
+      {samMode==="resume" && (
+        <div style={{ flex:1, overflowY:"auto", padding:"20px 24px", display:"flex", flexDirection:"column", gap:16 }}>
+          <div style={{ background:"#fafaf9", border:"1px solid #e5e3e0", borderRadius:12, padding:"18px 20px", display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#09090b" }}>Job Details</div>
+            <div style={{ display:"flex", gap:10 }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:11, color:"#a8a29e", fontWeight:600, marginBottom:4 }}>Job Title *</div>
+                <input value={rJob.title} onChange={e=>setRJob(j=>({...j,title:e.target.value}))}
+                  placeholder="e.g. Senior Data Engineer"
+                  style={{ width:"100%", padding:"8px 11px", border:"1.5px solid #e5e3e0", borderRadius:8, fontSize:13, color:"#1c1917", outline:"none", boxSizing:"border-box", background:"#fff" }}
+                  onFocus={e=>e.target.style.borderColor="#6c47ff"} onBlur={e=>e.target.style.borderColor="#e5e3e0"}/>
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:11, color:"#a8a29e", fontWeight:600, marginBottom:4 }}>Company</div>
+                <input value={rJob.company} onChange={e=>setRJob(j=>({...j,company:e.target.value}))}
+                  placeholder="e.g. Stripe"
+                  style={{ width:"100%", padding:"8px 11px", border:"1.5px solid #e5e3e0", borderRadius:8, fontSize:13, color:"#1c1917", outline:"none", boxSizing:"border-box", background:"#fff" }}
+                  onFocus={e=>e.target.style.borderColor="#6c47ff"} onBlur={e=>e.target.style.borderColor="#e5e3e0"}/>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:"#a8a29e", fontWeight:600, marginBottom:4 }}>Job Description (optional — paste for better skill matching)</div>
+              <textarea value={rJob.description} onChange={e=>setRJob(j=>({...j,description:e.target.value}))}
+                placeholder="Paste the job description here to improve skill matching and tailoring..."
+                rows={5}
+                style={{ width:"100%", padding:"8px 11px", border:"1.5px solid #e5e3e0", borderRadius:8, fontSize:12, color:"#1c1917", outline:"none", boxSizing:"border-box", background:"#fff", resize:"vertical", fontFamily:"inherit" }}
+                onFocus={e=>e.target.style.borderColor="#6c47ff"} onBlur={e=>e.target.style.borderColor="#e5e3e0"}/>
+            </div>
+            <button onClick={generateSamResume} disabled={rLoading || !rJob.title} style={{
+              padding:"10px 22px", background: rJob.title ? "linear-gradient(135deg,#6c47ff,#8b5cf6)" : "#e5e3e0",
+              color: rJob.title ? "#fff" : "#a8a29e", border:"none", borderRadius:9,
+              fontWeight:700, fontSize:13, cursor: rJob.title ? "pointer" : "default", alignSelf:"flex-start",
+            }}>
+              {rLoading ? "Generating..." : "Generate Tailored Resume"}
+            </button>
+          </div>
+          {rLoading && (
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:12, padding:"32px 0" }}>
+              <div style={{ width:36, height:36, border:"3px solid #e5e3e0", borderTopColor:"#6c47ff", borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+              <span style={{ color:"#a8a29e", fontSize:13 }}>Tailoring your resume for {rJob.title}...</span>
+            </div>
+          )}
+          {rResume && !rLoading && <ResumeView resume={rResume} onRegenerate={generateSamResume}/>}
+        </div>
+      )}
+
+      {/* Chat Messages (hidden when in resume mode) */}
+      {samMode==="chat" && <div style={{ flex:1, overflowY:"auto", padding:"20px 24px", display:"flex", flexDirection:"column", gap:16 }}>
 
         {/* Welcome state */}
         {messages.length===1 && messages[0].isWelcome && (
@@ -2346,29 +2527,31 @@ function AssistantChat({ showToast, profile }) {
           </div>
         ))}
         <div ref={bottomRef}/>
-      </div>
+      </div>}
 
-      {/* Input */}
-      <div style={{ padding:"14px 24px", borderTop:"1px solid #f0eeec", background:"#fff" }}>
-        <div style={{ display:"flex", gap:8, alignItems:"flex-end", background:"#fafaf9", border:"1.5px solid #e5e3e0", borderRadius:12, padding:"8px 12px" }}
-          onFocus={e=>e.currentTarget.style.borderColor="#6c47ff"}
-          onBlur={e=>e.currentTarget.style.borderColor="#e5e3e0"}>
-          <textarea ref={textaRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
-            placeholder="Ask SAM anything — jobs, resume, salary, interview prep…"
-            rows={1} disabled={streaming}
-            style={{ flex:1, background:"transparent", border:"none", resize:"none", fontSize:13, color:"#1c1917", outline:"none", fontFamily:"inherit", lineHeight:1.6, maxHeight:100, overflowY:"auto" }}/>
-          <button onClick={() => sendMessage()} disabled={!input.trim()||streaming} style={{
-            width:32, height:32, borderRadius:8, border:"none", flexShrink:0,
-            background: input.trim()&&!streaming?"linear-gradient(135deg,#6c47ff,#8b5cf6)":"#e5e3e0",
-            color: input.trim()&&!streaming?"#fff":"#a8a29e",
-            cursor: input.trim()&&!streaming?"pointer":"default",
-            display:"flex", alignItems:"center", justifyContent:"center",
-          }}>
-            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
-          </button>
+      {/* Chat Input — only in chat mode */}
+      {samMode==="chat" && (
+        <div style={{ padding:"14px 24px", borderTop:"1px solid #f0eeec", background:"#fff" }}>
+          <div style={{ display:"flex", gap:8, alignItems:"flex-end", background:"#fafaf9", border:"1.5px solid #e5e3e0", borderRadius:12, padding:"8px 12px" }}
+            onFocus={e=>e.currentTarget.style.borderColor="#6c47ff"}
+            onBlur={e=>e.currentTarget.style.borderColor="#e5e3e0"}>
+            <textarea ref={textaRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
+              placeholder="Ask SAM anything — jobs, resume, salary, interview prep..."
+              rows={1} disabled={streaming}
+              style={{ flex:1, background:"transparent", border:"none", resize:"none", fontSize:13, color:"#1c1917", outline:"none", fontFamily:"inherit", lineHeight:1.6, maxHeight:100, overflowY:"auto" }}/>
+            <button onClick={() => sendMessage()} disabled={!input.trim()||streaming} style={{
+              width:32, height:32, borderRadius:8, border:"none", flexShrink:0,
+              background: input.trim()&&!streaming?"linear-gradient(135deg,#6c47ff,#8b5cf6)":"#e5e3e0",
+              color: input.trim()&&!streaming?"#fff":"#a8a29e",
+              cursor: input.trim()&&!streaming?"pointer":"default",
+              display:"flex", alignItems:"center", justifyContent:"center",
+            }}>
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+          <div style={{ fontSize:11, color:"#d4d4d8", marginTop:6, textAlign:"center" }}>Shift+Enter for new line · Enter to send</div>
         </div>
-        <div style={{ fontSize:11, color:"#d4d4d8", marginTop:6, textAlign:"center" }}>Shift+Enter for new line · Enter to send</div>
-      </div>
+      )}
     </div>
   );
 }
