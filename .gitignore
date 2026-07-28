@@ -1,16 +1,31 @@
+# Dependencies
 node_modules/
+client/node_modules/
+
+# Environment & secrets
 .env
+cookies/
+
+# Build output
+client/dist/
+
+# Database & runtime data
 data.json
 scan-history.tsv
-client/node_modules/
-client/dist/
-server_out.log
-server_new.log
-client/client_out.log
-client/client_new.log
+outreach-log.json
+prisma/jobpilot.db
+
+# Logs
 *.log
-.DS_Store
 logs/
+
+# Uploads
+uploads/
+
+# Dev screenshots & debug images
 screenshots/
-*.clean
-server.js.clean
+scripts/tb-*.png
+
+# OS
+.DS_Store
+Thumbs.db

@@ -10,12 +10,12 @@ import dotenv from "dotenv";
 import Stripe from "stripe";
 import jwt from "jsonwebtoken";
 import multer from "multer";
-import { smartApply, detectPlatform, resetSession, scrapeLinkedInEasyApply } from "./autoApply.js";
-import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES, ATS_COMPANY_COUNT } from "./atsScrapers.js";
-import { scoreJob, scoreLabel, scoreColor } from "./scorer.js";
-import { generateViralImage } from "./imageGen.js";
-import { parseResume } from "./resumeParser.js";
-import { scrapeTickBig, invalidateTickBigToken } from "./tickbigScraper.js";
+import { smartApply, detectPlatform, resetSession, scrapeLinkedInEasyApply } from "./src/automation/autoApply.js";
+import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES, ATS_COMPANY_COUNT } from "./src/scrapers/atsScrapers.js";
+import { scoreJob, scoreLabel, scoreColor } from "./src/utils/scorer.js";
+import { generateViralImage } from "./src/utils/imageGen.js";
+import { parseResume } from "./src/utils/resumeParser.js";
+import { scrapeTickBig, invalidateTickBigToken } from "./src/scrapers/tickbigScraper.js";
 import { syncToGoogleSheets, isSheetsConfigured } from "./src/integrations/googleSheets.js";
 import { registerChatRoutes } from "./src/chat.js";
 import Groq from "groq-sdk";
@@ -2833,7 +2833,7 @@ function sanitizeSettings(s) {
 import { getLogs, getApplications, getJobs, getPipelineStages } from "./src/storage/db.js";
 import { bootstrap } from "./src/bootstrap.js";
 import { generateOutreach, generateInterviewPrep, analyzeSkillGap } from "./src/ai/prompts/outreach.js";
-import { runOutreachCycle, findRecruiters, closeOutreachBrowser } from "./recruiterOutreach.js";
+import { runOutreachCycle, findRecruiters, closeOutreachBrowser } from "./src/automation/recruiterOutreach.js";
 
 // â"€â"€â"€ Recruiter Outreach State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 let outreachLog   = [];   // { recruiter, company, sent, note, sentAt }

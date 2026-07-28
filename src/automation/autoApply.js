@@ -4,7 +4,7 @@ import path from "path";
 import os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { extractFormFields, aiMapFields, applyFieldMapping } from "./src/ai/formMapper.js";
+import { extractFormFields, aiMapFields, applyFieldMapping } from "../ai/formMapper.js";
 
 const execAsync = promisify(exec);
 
