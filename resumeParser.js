@@ -9,7 +9,7 @@ import path from "path";
 export async function extractText(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".pdf") {
-    const pdfParse = (await import("pdf-parse")).default;
+    const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
     const buf = fs.readFileSync(filePath);
     const data = await pdfParse(buf);
     return data.text || "";

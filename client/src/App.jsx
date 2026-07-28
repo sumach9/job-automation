@@ -305,7 +305,94 @@ function ResumeView({ resume, onRegenerate }) {
 }
 
 // --- Job Detail Panel (right-pane) --------------------------------------------
-function JobDetailPanel({ job, onApply, onClose }) {
+function parseVoiceIntent(text) {
+  const t = text.toLowerCase();
+  const workType = t.includes("remote") ? "remote" : t.includes("hybrid") ? "hybrid" : (t.includes("onsite") || t.includes("on-site")) ? "onsite" : "all";
+  // Extract location after "in/at/near", stop at work-type words and sentence-enders
+  const locM = t.match(/\b(?:in|at|near)\s+([a-z][a-z\s,]+?)(?:\s+(?:remote|hybrid|onsite|on-site|under|over|paying|salary|that|for)|$)/);
+  const rawLoc = locM ? locM[1].trim().replace(/,\s*$/, "") : "";
+  const location = rawLoc || (workType !== "all" ? "" : "");
+  const query = t
+    .replace(/\b(hey\s+)?sam[,\s]*/g, "")
+    .replace(/\b(find|show me|search for|look for|get me|i want|i need)\b/g, "")
+    .replace(/\b(jobs|roles|positions|openings|listings?)\b/g, "")
+    .replace(/\b(?:in|at|near)\s+[a-z][a-z\s,]+/g, "")
+    .replace(/\b(remote|hybrid|onsite|on-site)\b/g, "")
+    .replace(/\s+/g, " ").trim();
+  return { query: query || text.trim(), location, workType };
+}
+
+function VoiceMicButton({ onResult, disabled, isListening }) {
+  const recRef = useRef(null);
+  const [active, setActive] = useState(false);
+
+  function toggle() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Voice search needs Chrome or Edge. Open in one of those browsers."); return; }
+    if (active) { recRef.current?.stop(); return; }
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = "en-US"; rec.continuous = false; rec.interimResults = false;
+    rec.onstart  = () => setActive(true);
+    rec.onresult = e => onResult(e.results[0][0].transcript);
+    rec.onend    = () => setActive(false);
+    rec.onerror  = () => setActive(false);
+    rec.start();
+  }
+
+  const on = active;
+  return (
+    <button onClick={toggle} disabled={disabled} title={on ? "Listening — click to stop" : "Voice search — say your search"} style={{
+      width:44, height:44, borderRadius:10, flexShrink:0, cursor:"pointer",
+      border: on ? "none" : "1.5px solid #e5e3e0",
+      background: on ? "linear-gradient(135deg,#ff3e7f,#ff6b35)" : "#fff",
+      display:"flex", alignItems:"center", justifyContent:"center", position:"relative",
+      boxShadow: on ? "0 0 0 6px rgba(255,62,127,.18), 0 4px 14px rgba(255,62,127,.4)" : "0 1px 4px rgba(0,0,0,.06)",
+      transition:"all .2s",
+    }}>
+      {on && <span style={{ position:"absolute", inset:0, borderRadius:10, border:"2px solid rgba(255,62,127,.7)", animation:"voicePulse 1.1s ease-out infinite" }}/>}
+      {on ? (
+        <div style={{ display:"flex", gap:2, alignItems:"center", height:18 }}>
+          {[0,1,2,3,4].map(i => (
+            <div key={i} style={{ width:3, borderRadius:2, background:"#fff", height: "100%",
+              animation:`voiceWave .8s ease-in-out ${i*0.1}s infinite`, transformOrigin:"bottom" }}/>
+          ))}
+        </div>
+      ) : (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" strokeLinecap="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function DiffRenderer({ text, isDiffing }) {
+  const SECTIONS = { "MATCH": "match", "GAPS": "gaps", "QUICK FIXES": "fixes" };
+  const COLORS   = { match:"#16a34a", gaps:"#dc2626", fixes:"#d97706", verdict:"#6c47ff" };
+  const BG       = { match:"rgba(22,163,74,.07)", gaps:"rgba(220,38,38,.07)", fixes:"rgba(217,119,6,.07)" };
+  let section = null;
+  const nodes = [];
+  text.split("\n").forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) { nodes.push(<div key={i} style={{height:6}}/>); return; }
+    if (SECTIONS[line]) {
+      section = SECTIONS[line];
+      nodes.push(<div key={i} style={{color:COLORS[section],fontWeight:700,fontSize:10,letterSpacing:"0.1em",marginTop:14,marginBottom:4}}>{line}</div>);
+      return;
+    }
+    if (line.startsWith("VERDICT")) {
+      nodes.push(<div key={i} style={{marginTop:16,padding:"10px 14px",background:"#f3f0ff",borderRadius:10,borderLeft:"3px solid #6c47ff",fontSize:13,color:"#1c1917",fontFamily:"system-ui,sans-serif",lineHeight:1.5}}><span style={{fontWeight:700,color:"#6c47ff"}}>Verdict  </span>{line.replace(/^VERDICT:\s*/,"")}</div>);
+      return;
+    }
+    const col = COLORS[section] || "#57534e";
+    const bg  = BG[section]     || "transparent";
+    nodes.push(<div key={i} style={{color:col,background:bg,padding:"3px 10px",borderRadius:5,marginBottom:2,fontSize:12,lineHeight:1.6,fontFamily:"'Cascadia Code','Fira Mono','Consolas',monospace"}}>{line}</div>);
+  });
+  return <div style={{padding:"4px 0"}}>{nodes}{isDiffing && <span style={{color:"#6c47ff",fontWeight:700,animation:"blink 1s step-end infinite"}}>▌</span>}</div>;
+}
+
+function JobDetailPanel({ job, onApply, onClose, onWarRoom }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [skillGap, setSkillGap]       = useState(null);
   const [resume, setResume]           = useState(null);
@@ -313,8 +400,14 @@ function JobDetailPanel({ job, onApply, onClose }) {
   const [loadingGap, setLoadingGap]   = useState(false);
   const [loadingResume, setLoadingResume] = useState(false);
   const [loadingCover, setLoadingCover]   = useState(false);
+  const [diffText, setDiffText]     = useState("");
+  const [isDiffing, setIsDiffing]   = useState(false);
+  const [diffDone, setDiffDone]     = useState(false);
 
-  useEffect(() => { setSkillGap(null); setResume(null); setCoverLetter(null); setActiveTab("overview"); }, [job]);
+  useEffect(() => {
+    setSkillGap(null); setResume(null); setCoverLetter(null); setActiveTab("overview");
+    setDiffText(""); setIsDiffing(false); setDiffDone(false);
+  }, [job]);
   if (!job) return (
     <div style={{
       flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
@@ -362,6 +455,46 @@ function JobDetailPanel({ job, onApply, onClose }) {
     setLoadingCover(false);
   }
 
+  async function startResumeDiff() {
+    if (isDiffing) return;
+    setDiffText(""); setDiffDone(false); setIsDiffing(true); setActiveTab("diff");
+    const token = localStorage.getItem("jobpilot_token") || localStorage.getItem("token") || "";
+    try {
+      const resp = await fetch(`${API}/resume-diff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ title: job.title, company: job.company, description: job.description || "" }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setDiffText(err.error || "Analysis failed — upload your resume first."); setIsDiffing(false); return;
+      }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") { setDiffDone(true); continue; }
+          try {
+            const { t, error } = JSON.parse(payload);
+            if (t) setDiffText(prev => prev + t);
+            if (error) setDiffText(prev => prev + "\nError: " + error);
+          } catch {}
+        }
+      }
+    } catch (e) {
+      setDiffText("Connection error: " + e.message);
+    }
+    setIsDiffing(false);
+  }
+
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:"#fff", borderLeft:"1px solid #e5e3e0" }}>
       {/* Header */}
@@ -395,6 +528,23 @@ function JobDetailPanel({ job, onApply, onClose }) {
           padding:"7px 16px", background:"#6c47ff", color:"#fff", borderRadius:8,
           fontWeight:600, fontSize:12, textDecoration:"none",
         }}>Open Job ↗</a>
+        {onWarRoom && (
+          <button onClick={()=>onWarRoom(job)} style={{ padding:"7px 14px", background:"linear-gradient(135deg,#0f172a,#1e1b4b)", color:"#a78bfa", border:"1px solid rgba(167,139,250,.3)", borderRadius:8, fontWeight:700, fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+            🎯 War Room
+          </button>
+        )}
+        <button onClick={startResumeDiff} disabled={isDiffing} style={{
+          padding:"7px 14px", borderRadius:8, fontWeight:700, fontSize:12, cursor:isDiffing?"default":"pointer",
+          background: isDiffing ? "#f3f0ff" : "linear-gradient(135deg,#6c47ff,#8b5cf6)",
+          color: isDiffing ? "#6c47ff" : "#fff",
+          border: isDiffing ? "1px solid #6c47ff40" : "none",
+          display:"flex", alignItems:"center", gap:6,
+          boxShadow: isDiffing ? "none" : "0 2px 10px rgba(108,71,255,.35)",
+        }}>
+          {isDiffing
+            ? <><div style={{width:10,height:10,border:"2px solid #6c47ff40",borderTopColor:"#6c47ff",borderRadius:"50%",animation:"spin .7s linear infinite"}}/> Analyzing…</>
+            : <>⚡ Live Diff</>}
+        </button>
         <button onClick={loadSkillGap} style={{
           padding:"7px 14px", background:"#fff", color:"#57534e", border:"1px solid #e5e3e0",
           borderRadius:8, fontWeight:600, fontSize:12, cursor:"pointer",
@@ -419,10 +569,14 @@ function JobDetailPanel({ job, onApply, onClose }) {
           borderRadius:8, fontWeight:600, fontSize:12, textDecoration:"none",
         }}>Find Recruiter</a>
       </div>
+      {/* Autopilot Apply — scans form & maps profile fields */}
+      <div style={{ padding:"8px 24px", borderBottom:"1px solid #f0eeec" }}>
+        <AutopilotApply job={job} showToast={()=>{}}/>
+      </div>
 
       {/* Tabs */}
       <div style={{ display:"flex", borderBottom:"1px solid #f0eeec", padding:"0 24px" }}>
-        {[["overview","Overview"],["gap","Skill Gap"],["resume","Resume"],["cover","Cover Letter"],["salary","Salary"]].map(([id,lbl]) => (
+        {[["overview","Overview"],["diff","⚡ Live Diff"],["gap","Skill Gap"],["resume","Resume"],["cover","Cover Letter"],["salary","Salary"]].map(([id,lbl]) => (
           <button key={id} onClick={() => setActiveTab(id)} style={{
             padding:"10px 0", marginRight:20, background:"none", border:"none",
             borderBottom: activeTab===id ? "2px solid #6c47ff" : "2px solid transparent",
@@ -515,6 +669,34 @@ function JobDetailPanel({ job, onApply, onClose }) {
             </div>
           )}
         </>}
+
+        {activeTab==="diff" && (
+          <div>
+            {!diffText && !isDiffing && (
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:"48px 0", textAlign:"center" }}>
+                <div style={{ fontSize:36 }}>⚡</div>
+                <div style={{ fontSize:15, fontWeight:700, color:"#1c1917" }}>Live Resume Match</div>
+                <div style={{ fontSize:13, color:"#a8a29e", maxWidth:300, lineHeight:1.6 }}>AI streams a line-by-line diff of your resume against this job description in real time.</div>
+                <button onClick={startResumeDiff} style={{
+                  padding:"10px 28px", borderRadius:10, border:"none", cursor:"pointer",
+                  background:"linear-gradient(135deg,#6c47ff,#8b5cf6)", color:"#fff",
+                  fontWeight:700, fontSize:14, boxShadow:"0 4px 14px rgba(108,71,255,.4)",
+                }}>⚡ Run Live Diff</button>
+              </div>
+            )}
+            {(diffText || isDiffing) && (
+              <div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14, paddingBottom:10, borderBottom:"1px solid #f0eeec" }}>
+                  <span style={{ fontSize:11, fontWeight:700, color:"#6c47ff", letterSpacing:"0.08em", textTransform:"uppercase" }}>Resume vs Job Description</span>
+                  {isDiffing && <span style={{ fontSize:10, color:"#a8a29e" }}>streaming…</span>}
+                  {diffDone  && <span style={{ fontSize:10, color:"#16a34a", fontWeight:600 }}>✓ complete</span>}
+                  {diffDone  && <button onClick={startResumeDiff} style={{ marginLeft:"auto", fontSize:11, color:"#6c47ff", background:"#f3f0ff", border:"1px solid #6c47ff30", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontWeight:600 }}>Re-run</button>}
+                </div>
+                <DiffRenderer text={diffText} isDiffing={isDiffing}/>
+              </div>
+            )}
+          </div>
+        )}
 
         {activeTab==="gap" && (
           <div>
@@ -718,16 +900,86 @@ function JobDetailPanel({ job, onApply, onClose }) {
   );
 }
 
+// --- Job Card (grid view, hiring.cafe style) ----------------------------------
+function JobCard({ job, selected, onClick, onDragStart, onDragEnd }) {
+  const [hov, setHov] = useState(false);
+  const skills = job.matchedSkills?.length ? job.matchedSkills : (job.skills || []);
+  return (
+    <div
+      draggable="true"
+      onDragStart={e => { e.dataTransfer.effectAllowed="copy"; onDragStart && onDragStart(); }}
+      onDragEnd={() => onDragEnd && onDragEnd()}
+      onClick={() => onClick(job)}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background:"#fff", borderRadius:14, cursor:"grab", position:"relative",
+        border:`1.5px solid ${selected?"#6c47ff":hov?"#c4b5fd":"#e5e3e0"}`,
+        boxShadow: selected?"0 0 0 3px #6c47ff20":hov?"0 4px 20px rgba(108,71,255,0.1)":"0 1px 3px rgba(0,0,0,0.05)",
+        transition:"all 0.15s", display:"flex", flexDirection:"column", overflow:"hidden",
+      }}
+    >
+      <div style={{ position:"absolute", top:10, right:10, color:"#d4d2d0", fontSize:11, letterSpacing:1, userSelect:"none" }}>⠿⠿</div>
+      <div style={{ padding:"16px 16px 12px" }}>
+        <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:10 }}>
+          <Avatar name={job.company} size={36}/>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:11, color:"#a8a29e", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{job.company}</div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#1c1917", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{job.title}</div>
+          </div>
+          <ScoreBadge score={job.score} size="sm"/>
+        </div>
+        <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", marginBottom:8 }}>
+          {job.location && (
+            <span style={{ fontSize:11, color:"#78716c", display:"flex", alignItems:"center", gap:3 }}>
+              <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              {job.location}
+            </span>
+          )}
+          {(job.salary||job.salaryRange) && (
+            <span style={{ fontSize:11, fontWeight:600, color:"#16a34a", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:20, padding:"1px 8px" }}>
+              {job.salary||job.salaryRange}
+            </span>
+          )}
+        </div>
+        <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom: skills.length?10:0 }}>
+          <PlatformTag platform={job.platform}/>
+          {job.easyApply && <span style={{ background:"#dcfce7", color:"#16a34a", border:"1px solid #bbf7d0", borderRadius:5, padding:"1px 6px", fontSize:10, fontWeight:600 }}>Easy Apply</span>}
+          {job.remote && <span style={{ background:"#eff6ff", color:"#2563eb", border:"1px solid #bfdbfe", borderRadius:5, padding:"1px 6px", fontSize:10, fontWeight:600 }}>{job.remote}</span>}
+        </div>
+        {skills.length > 0 && (
+          <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+            {skills.slice(0,5).map(s => (
+              <span key={s} style={{ background:"#f3f0ff", color:"#6c47ff", border:"1px solid #ede9fe", borderRadius:20, padding:"2px 8px", fontSize:10, fontWeight:600 }}>
+                {job.matchedSkills?.includes(s)?"✓ ":""}{s}
+              </span>
+            ))}
+            {skills.length>5 && <span style={{ fontSize:10, color:"#a8a29e", alignSelf:"center" }}>+{skills.length-5}</span>}
+          </div>
+        )}
+      </div>
+      <div style={{ padding:"8px 16px", borderTop:"1px solid #f5f4f2", display:"flex", alignItems:"center", justifyContent:"space-between", background:selected?"#faf8ff":"#fafaf9" }}>
+        <span style={{ fontSize:10, color:"#a8a29e" }}>{relTime(job.savedAt)}</span>
+        <span style={{ fontSize:11, fontWeight:600, color:"#6c47ff" }}>View details →</span>
+      </div>
+    </div>
+  );
+}
+
 // --- Job Row (left pane) ------------------------------------------------------
-function JobRow({ job, selected, onClick }) {
+function JobRow({ job, selected, onClick, onDragStart, onDragEnd }) {
   const c = companyColor(job.company);
   return (
-    <div onClick={() => onClick(job)} style={{
-      padding:"14px 16px", borderBottom:"1px solid #f5f4f2", cursor:"pointer",
-      background: selected ? "#f4f4f5" : "#fff",
-      borderLeft: selected ? "3px solid #6c47ff" : "3px solid transparent",
-      transition:"background .1s",
-    }}
+    <div onClick={() => onClick(job)}
+      draggable="true"
+      onDragStart={e => { e.dataTransfer.effectAllowed="copy"; onDragStart && onDragStart(); }}
+      onDragEnd={() => onDragEnd && onDragEnd()}
+      style={{
+        padding:"14px 16px", borderBottom:"1px solid #f5f4f2", cursor:"grab",
+        background: selected ? "#f4f4f5" : "#fff",
+        borderLeft: selected ? "3px solid #6c47ff" : "3px solid transparent",
+        transition:"background .1s",
+      }}
       onMouseEnter={e => { if (!selected) { e.currentTarget.style.background="#fafafa"; e.currentTarget.style.boxShadow="inset 0 0 0 1px rgba(108,71,255,0.12)"; } }}
       onMouseLeave={e => { if (!selected) { e.currentTarget.style.background="#fff"; e.currentTarget.style.boxShadow="none"; } }}
     >
@@ -1867,6 +2119,496 @@ function OutreachPage({ showToast, profile }) {
     </div>
   );
 }
+// ═══════════════════════════════════════════════════════════════════
+// 👻  GHOSTING ORACLE
+// ═══════════════════════════════════════════════════════════════════
+function GhostingOracle({ applications }) {
+  const [scores, setScores]       = useState({});
+  const [trained, setTrained]     = useState(false);
+  const [training, setTraining]   = useState(false);
+  const [accuracy, setAccuracy]   = useState(null);
+  const [tfReady, setTfReady]     = useState(false);
+
+  useEffect(() => {
+    // load TF.js from CDN once
+    if (window.tf) { setTfReady(true); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js";
+    s.onload = () => setTfReady(true);
+    document.head.appendChild(s);
+  }, []);
+
+  useEffect(() => { if (tfReady && applications.length >= 10) trainOracle(); }, [tfReady, applications.length]);
+
+  function features(a) {
+    const days = Math.min((Date.now() - new Date(a.savedAt || a.createdAt || Date.now()).getTime()) / 86400000, 90);
+    const seniorityMap = { senior:1, lead:1, principal:1, staff:1, junior:0, entry:0 };
+    const seniority = Object.entries(seniorityMap).reduce((v,[k,n])=>(a.title||"").toLowerCase().includes(k)?n:v, 0.5);
+    const isLinkedIn = (a.platform||"").toLowerCase().includes("linkedin") ? 1 : 0;
+    const hasDesc    = (a.description||"").length > 50 ? 1 : 0;
+    const statusN    = { applied:0.5, saved:0.2, screening:0.1, interview:0, offer:0, rejected:0.05 }[a.status] ?? 0.4;
+    return [days/90, seniority, isLinkedIn, hasDesc, statusN];
+  }
+
+  function label(a) {
+    if (["interview","interviewing","offered"].includes(a.status)) return 0; // got response
+    if (["rejected"].includes(a.status)) return 0; // got response (rejection counts)
+    const days = (Date.now() - new Date(a.savedAt || a.createdAt || Date.now()).getTime()) / 86400000;
+    if (days > 21 && ["applied","onetouch-filled","auto-applied","easy-apply-pending"].includes(a.status)) return 1; // ghosted
+    return null; // unknown
+  }
+
+  async function trainOracle() {
+    if (!window.tf || training) return;
+    setTraining(true);
+    try {
+      const labeled = applications.map(a => ({ f: features(a), l: label(a), id: a.id || a.jobId })).filter(d => d.l !== null);
+      if (labeled.length < 8) { setTraining(false); return; }
+
+      const tf = window.tf;
+      const xs = tf.tensor2d(labeled.map(d => d.f));
+      const ys = tf.tensor2d(labeled.map(d => [d.l]));
+
+      const model = tf.sequential({ layers: [
+        tf.layers.dense({ inputShape:[5], units:16, activation:"relu" }),
+        tf.layers.dropout({ rate:0.25 }),
+        tf.layers.dense({ units:8, activation:"relu" }),
+        tf.layers.dense({ units:1, activation:"sigmoid" }),
+      ]});
+      model.compile({ optimizer:tf.train.adam(0.015), loss:"binaryCrossentropy", metrics:["accuracy"] });
+      const hist = await model.fit(xs, ys, { epochs:60, batchSize:16, validationSplit:0.15, verbose:0 });
+      const acc  = hist.history.acc?.slice(-1)[0] || hist.history.accuracy?.slice(-1)[0] || 0;
+      setAccuracy(Math.round(acc * 100));
+
+      const allFeats = tf.tensor2d(applications.map(a => features(a)));
+      const preds    = model.predict(allFeats);
+      const arr      = await preds.data();
+      const newScores = {};
+      applications.forEach((a, i) => { newScores[a.id || a.jobId || i] = Math.round(arr[i] * 100); });
+      setScores(newScores);
+      setTrained(true);
+      [xs, ys, allFeats, preds].forEach(t => t.dispose());
+    } catch(e) { console.warn("Oracle training failed:", e); }
+    setTraining(false);
+  }
+
+  if (!tfReady || applications.length < 10) return null;
+
+  const ghostRisk = pct => pct >= 75 ? { color:"#dc2626", label:"High risk" }
+    : pct >= 45 ? { color:"#d97706", label:"Maybe" }
+    : { color:"#16a34a", label:"Low risk" };
+
+  const oracleApps = applications
+    .map(a => ({ ...a, ghost: scores[a.id || a.jobId || ""] ?? null }))
+    .filter(a => a.ghost !== null)
+    .sort((a, b) => b.ghost - a.ghost)
+    .slice(0, 6);
+
+  return (
+    <div style={{ background:"linear-gradient(135deg,#0f0f23,#1a0a2e)", borderRadius:16, padding:24, marginBottom:24, border:"1px solid rgba(108,71,255,.3)" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
+        <span style={{ fontSize:22 }}>👻</span>
+        <div>
+          <div style={{ color:"#e2e8f0", fontWeight:700, fontSize:16 }}>Ghosting Oracle</div>
+          <div style={{ color:"#94a3b8", fontSize:11 }}>
+            {training ? "Training neural net on your data…" : trained ? `TF.js model · ${accuracy}% accurate · ${Object.keys(scores).length} apps scored` : "Loading model…"}
+          </div>
+        </div>
+        {!training && <button onClick={trainOracle} style={{ marginLeft:"auto", background:"rgba(108,71,255,.25)", color:"#a78bfa", border:"1px solid rgba(108,71,255,.4)", borderRadius:8, padding:"5px 12px", fontSize:11, fontWeight:600, cursor:"pointer" }}>Retrain</button>}
+      </div>
+      {training && <div style={{ height:4, background:"rgba(255,255,255,.1)", borderRadius:4, overflow:"hidden", marginBottom:16 }}><div style={{ height:"100%", width:"60%", background:"linear-gradient(90deg,#6c47ff,#a78bfa)", borderRadius:4, animation:"shimmer 1.5s infinite" }}/></div>}
+      {oracleApps.length > 0 && (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:10 }}>
+          {oracleApps.map(a => {
+            const risk = ghostRisk(a.ghost);
+            return (
+              <div key={a.id||a.jobId} style={{ background:"rgba(255,255,255,.05)", borderRadius:10, padding:"12px 14px", border:`1px solid ${risk.color}30` }}>
+                <div style={{ fontSize:11, color:"#cbd5e1", fontWeight:600, marginBottom:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.title||"Unknown role"}</div>
+                <div style={{ fontSize:10, color:"#94a3b8", marginBottom:8, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.company}</div>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <div style={{ flex:1, height:5, background:"rgba(255,255,255,.1)", borderRadius:3 }}>
+                    <div style={{ height:"100%", width:`${a.ghost}%`, background:risk.color, borderRadius:3, transition:"width .4s" }}/>
+                  </div>
+                  <span style={{ fontSize:11, fontWeight:700, color:risk.color }}>{a.ghost}%</span>
+                </div>
+                <div style={{ fontSize:10, color:risk.color, marginTop:4 }}>{risk.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 🎯  INTERVIEW WAR ROOM  (streaming Claude interviewer + voice)
+// ═══════════════════════════════════════════════════════════════════
+function InterviewWarRoom({ job, onClose, showToast, profile }) {
+  const [history, setHistory]     = useState([]);
+  const [aiText, setAiText]       = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [userInput, setUserInput] = useState("");
+  const [listening, setListening] = useState(false);
+  const [score, setScore]         = useState(null);
+  const [started, setStarted]     = useState(false);
+  const chatRef = useRef(null);
+  const recRef  = useRef(null);
+
+  useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, [history, aiText]);
+
+  async function sendMessage(text) {
+    if (!text.trim() || streaming) return;
+    const userMsg = { role:"user", content: text };
+    const newHistory = [...history, userMsg];
+    setHistory(newHistory);
+    setUserInput("");
+    setStreaming(true);
+    setAiText("");
+
+    try {
+      const token = localStorage.getItem("jobpilot_token");
+      const res = await fetch(`${API}/interview`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+token },
+        body: JSON.stringify({
+          jobTitle:    job?.title || "Software Engineer",
+          company:     job?.company || "the company",
+          description: job?.description || "",
+          userMessage: text,
+          history:     newHistory.slice(-8),
+        }),
+      });
+
+      const reader = res.body.getReader();
+      const dec    = new TextDecoder();
+      let full = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        for (const line of dec.decode(value).split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const d = line.slice(5).trim();
+          if (d === "[DONE]") break;
+          try { full += JSON.parse(d).t || ""; setAiText(full); } catch {}
+        }
+      }
+
+      // extract score if present
+      const scoreM = full.match(/SCORE:\s*(\d+)\/10/);
+      if (scoreM) setScore(parseInt(scoreM[1]));
+
+      setHistory(h => [...h, { role:"assistant", content: full }]);
+    } catch(e) { showToast("Interview error: "+e.message, "error"); }
+    setAiText("");
+    setStreaming(false);
+  }
+
+  function toggleVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { showToast("Voice needs Chrome/Edge","error"); return; }
+    if (listening) {
+      recRef.current?.stop(); setListening(false); return;
+    }
+    const r = new SR(); r.lang="en-US"; r.interimResults=false;
+    r.onresult = e => { const t = e.results[0][0].transcript; setUserInput(t); sendMessage(t); };
+    r.onend    = () => setListening(false);
+    r.onerror  = () => setListening(false);
+    recRef.current = r; r.start(); setListening(true);
+  }
+
+  const scoreColor = s => s >= 8 ? "#16a34a" : s >= 6 ? "#d97706" : "#dc2626";
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", backdropFilter:"blur(6px)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div style={{ background:"#0f172a", borderRadius:20, width:"100%", maxWidth:720, height:"85vh", display:"flex", flexDirection:"column", border:"1px solid rgba(108,71,255,.4)", overflow:"hidden" }}>
+        {/* Header */}
+        <div style={{ padding:"16px 20px", borderBottom:"1px solid rgba(255,255,255,.08)", display:"flex", alignItems:"center", gap:12 }}>
+          <span style={{ fontSize:20 }}>🎯</span>
+          <div style={{ flex:1 }}>
+            <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:15 }}>Interview War Room</div>
+            <div style={{ color:"#64748b", fontSize:11 }}>{job?.title || "General"} · {job?.company || "Practice mode"}</div>
+          </div>
+          {score !== null && (
+            <div style={{ background:`${scoreColor(score)}18`, border:`1px solid ${scoreColor(score)}40`, borderRadius:10, padding:"6px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:18, fontWeight:800, color:scoreColor(score) }}>{score}/10</div>
+              <div style={{ fontSize:9, color:scoreColor(score), fontWeight:600 }}>SCORE</div>
+            </div>
+          )}
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,.06)", border:"none", color:"#94a3b8", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:18, lineHeight:1 }}>×</button>
+        </div>
+
+        {/* Chat area */}
+        <div ref={chatRef} style={{ flex:1, overflowY:"auto", padding:20, display:"flex", flexDirection:"column", gap:14 }}>
+          {!started && (
+            <div style={{ textAlign:"center", marginTop:40 }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>🎯</div>
+              <div style={{ color:"#e2e8f0", fontWeight:700, fontSize:17, marginBottom:8 }}>Ready to practice?</div>
+              <div style={{ color:"#64748b", fontSize:13, marginBottom:24 }}>Claude will interview you for <strong style={{ color:"#a78bfa" }}>{job?.title||"your role"}</strong>.<br/>Answer out loud or type. It scores you after 5 questions.</div>
+              <button onClick={() => { setStarted(true); sendMessage("Hello, I'm ready to start the interview."); }} style={{ background:"linear-gradient(135deg,#6c47ff,#a78bfa)", color:"#fff", border:"none", borderRadius:10, padding:"13px 28px", fontWeight:700, fontSize:14, cursor:"pointer" }}>Start Interview</button>
+            </div>
+          )}
+          {history.map((m, i) => (
+            <div key={i} style={{ display:"flex", gap:10, flexDirection: m.role==="user" ? "row-reverse" : "row" }}>
+              <div style={{ width:30, height:30, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14,
+                background: m.role==="user" ? "#6c47ff" : "rgba(255,255,255,.08)" }}>
+                {m.role==="user" ? "👤" : "🤖"}
+              </div>
+              <div style={{ maxWidth:"75%", background: m.role==="user" ? "rgba(108,71,255,.2)" : "rgba(255,255,255,.06)", borderRadius:12, padding:"10px 14px", fontSize:13, color:"#e2e8f0", lineHeight:1.6, whiteSpace:"pre-wrap" }}>
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {streaming && aiText && (
+            <div style={{ display:"flex", gap:10 }}>
+              <div style={{ width:30, height:30, borderRadius:"50%", background:"rgba(255,255,255,.08)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>🤖</div>
+              <div style={{ background:"rgba(255,255,255,.06)", borderRadius:12, padding:"10px 14px", fontSize:13, color:"#e2e8f0", lineHeight:1.6, whiteSpace:"pre-wrap", maxWidth:"75%" }}>
+                {aiText}<span style={{ animation:"blink 1s infinite", opacity:1 }}>▌</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Input bar */}
+        {started && !score && (
+          <div style={{ padding:"12px 16px", borderTop:"1px solid rgba(255,255,255,.08)", display:"flex", gap:10 }}>
+            <input
+              value={userInput} onChange={e=>setUserInput(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&sendMessage(userInput)}
+              placeholder="Type your answer…" disabled={streaming}
+              style={{ flex:1, background:"rgba(255,255,255,.06)", border:"1px solid rgba(255,255,255,.1)", borderRadius:10, padding:"10px 14px", color:"#e2e8f0", fontSize:13, outline:"none" }}
+            />
+            <button onClick={toggleVoice} title="Voice answer" style={{ background: listening ? "rgba(239,68,68,.2)" : "rgba(255,255,255,.06)", border:`1px solid ${listening?"#ef4444":"rgba(255,255,255,.1)"}`, borderRadius:10, width:42, cursor:"pointer", fontSize:17 }}>
+              {listening ? "🔴" : "🎤"}
+            </button>
+            <button onClick={()=>sendMessage(userInput)} disabled={!userInput.trim()||streaming} style={{ background:"#6c47ff", color:"#fff", border:"none", borderRadius:10, padding:"0 18px", fontWeight:700, fontSize:13, cursor:"pointer", opacity:(!userInput.trim()||streaming)?0.5:1 }}>Send</button>
+          </div>
+        )}
+        {score !== null && (
+          <div style={{ padding:"14px 20px", borderTop:"1px solid rgba(255,255,255,.08)", display:"flex", gap:10, justifyContent:"center" }}>
+            <button onClick={()=>{ setHistory([]); setScore(null); setStarted(false); setAiText(""); }} style={{ background:"rgba(108,71,255,.2)", color:"#a78bfa", border:"1px solid rgba(108,71,255,.4)", borderRadius:10, padding:"10px 20px", fontWeight:700, fontSize:13, cursor:"pointer" }}>Practice Again</button>
+            <button onClick={onClose} style={{ background:"rgba(255,255,255,.06)", color:"#94a3b8", border:"1px solid rgba(255,255,255,.1)", borderRadius:10, padding:"10px 20px", fontWeight:700, fontSize:13, cursor:"pointer" }}>Close</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 🌌  SEMANTIC JOB GALAXY  (canvas 2-D job map)
+// ═══════════════════════════════════════════════════════════════════
+function JobGalaxy({ jobs, onSelect }) {
+  const canvasRef = useRef(null);
+  const nodesRef  = useRef([]);
+  const animRef   = useRef(null);
+  const [ready, setReady]     = useState(false);
+  const [hovered, setHovered] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!jobs.length) return;
+    setLoading(true);
+
+    // Simple PCA-like placement using two text signals as axes:
+    // X = seniority score (junior → senior), Y = salary signal
+    const keywords = {
+      senior:["senior","lead","principal","staff","director","vp","head"],
+      junior:["junior","entry","associate","intern","graduate","trainee"],
+      tech:["engineer","developer","scientist","analyst","architect","devops"],
+      biz:["manager","product","marketing","sales","recruiter","coordinator"],
+    };
+    function score(job) {
+      const t = (job.title + " " + job.description).toLowerCase();
+      const seniority = keywords.senior.some(w=>t.includes(w)) ? 1 : keywords.junior.some(w=>t.includes(w)) ? -1 : (Math.random()-.5)*.5;
+      const domain    = keywords.tech.some(w=>t.includes(w)) ? 1 : keywords.biz.some(w=>t.includes(w)) ? -1 : (Math.random()-.5)*.5;
+      return { x: seniority + (Math.random()-.5)*.4, y: domain + (Math.random()-.5)*.4 };
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const W = canvas.width  = canvas.offsetWidth;
+    const H = canvas.height = canvas.offsetHeight;
+    const cx = W/2, cy = H/2, scale = Math.min(W,H)/2.6;
+
+    const nodes = jobs.slice(0,80).map((job, i) => {
+      const { x, y } = score(job);
+      const r = 6 + (job.score||0) * 1.5;
+      const baseX = cx + x * scale + (Math.random()-.5)*30;
+      const baseY = cy + y * scale + (Math.random()-.5)*30;
+      return { job, x:baseX, y:baseY, vx:0, vy:0, r,
+        color: job.platform?.includes("LinkedIn") ? "#0a66c2"
+          : job.platform?.includes("Apify")       ? "#6c47ff"
+          : "#16a34a" };
+    });
+
+    // simple repulsion passes
+    for (let iter = 0; iter < 30; iter++) {
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i+1; j < nodes.length; j++) {
+          const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+          const dist = Math.sqrt(dx*dx+dy*dy) || 1;
+          const minD = nodes[i].r + nodes[j].r + 8;
+          if (dist < minD) {
+            const f = (minD-dist)/dist * 0.5;
+            nodes[i].x += dx*f; nodes[i].y += dy*f;
+            nodes[j].x -= dx*f; nodes[j].y -= dy*f;
+          }
+        }
+      }
+    }
+
+    nodesRef.current = nodes;
+    setReady(true);
+    setLoading(false);
+
+    let hovIdx = -1;
+    function draw() {
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0,0,W,H);
+      // background
+      ctx.fillStyle="#0a0a14"; ctx.fillRect(0,0,W,H);
+      // stars
+      for (let i=0;i<60;i++) { ctx.fillStyle="rgba(255,255,255,.3)"; ctx.beginPath(); ctx.arc((i*137.5)%W,(i*97.3)%H,Math.random()<.1?.8:.3,0,Math.PI*2); ctx.fill(); }
+      // axis labels
+      ctx.fillStyle="rgba(255,255,255,.18)"; ctx.font="11px sans-serif";
+      ctx.fillText("← Junior",8,cy); ctx.fillText("Senior →",W-70,cy);
+      ctx.fillText("Tech↑",cx+4,16); ctx.fillText("↓Biz",cx+4,H-6);
+      // draw nodes
+      nodes.forEach((n,i) => {
+        const isHov = i===hovIdx;
+        ctx.beginPath(); ctx.arc(n.x,n.y,isHov?n.r+3:n.r,0,Math.PI*2);
+        ctx.fillStyle = isHov ? "#fff" : n.color+"cc";
+        ctx.fill();
+        if (isHov || n.job.score >= 3.5) {
+          ctx.fillStyle="rgba(255,255,255,.85)"; ctx.font=`${isHov?12:10}px sans-serif`;
+          const label = (n.job.title||"").slice(0,22);
+          ctx.fillText(label, n.x+n.r+4, n.y+4);
+        }
+        if (n.job.salary) {
+          ctx.fillStyle="#fbbf24"; ctx.font="8px sans-serif";
+          ctx.fillText("$",n.x-3,n.y+3);
+        }
+      });
+    }
+    draw();
+
+    function onMove(e) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX-rect.left)*(W/rect.width), my = (e.clientY-rect.top)*(H/rect.height);
+      hovIdx = nodes.findIndex(n => Math.sqrt((n.x-mx)**2+(n.y-my)**2) <= n.r+4);
+      setHovered(hovIdx >= 0 ? nodes[hovIdx].job : null);
+      draw();
+    }
+    function onClick(e) {
+      const rect = canvas.getBoundingClientRect();
+      const mx=(e.clientX-rect.left)*(W/rect.width), my=(e.clientY-rect.top)*(H/rect.height);
+      const n = nodes.find(n => Math.sqrt((n.x-mx)**2+(n.y-my)**2) <= n.r+4);
+      if (n) onSelect(n.job);
+    }
+    canvas.addEventListener("mousemove",onMove);
+    canvas.addEventListener("click",onClick);
+    return () => { canvas.removeEventListener("mousemove",onMove); canvas.removeEventListener("click",onClick); };
+  }, [jobs]);
+
+  return (
+    <div style={{ position:"relative", width:"100%", height:480, borderRadius:16, overflow:"hidden", border:"1px solid rgba(108,71,255,.25)" }}>
+      {loading && <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#0a0a14", color:"#64748b", fontSize:13 }}>Mapping job galaxy…</div>}
+      <canvas ref={canvasRef} style={{ width:"100%", height:"100%", display:"block", cursor:"crosshair" }}/>
+      {hovered && (
+        <div style={{ position:"absolute", bottom:12, left:12, background:"rgba(15,23,42,.95)", border:"1px solid rgba(108,71,255,.4)", borderRadius:10, padding:"10px 14px", maxWidth:300, pointerEvents:"none" }}>
+          <div style={{ color:"#e2e8f0", fontWeight:700, fontSize:13 }}>{hovered.title}</div>
+          <div style={{ color:"#94a3b8", fontSize:11, marginTop:2 }}>{hovered.company} · {hovered.location}</div>
+          {hovered.salary && <div style={{ color:"#fbbf24", fontSize:11, marginTop:4 }}>{hovered.salary}</div>}
+          <div style={{ color:"#64748b", fontSize:10, marginTop:4 }}>Click to open details</div>
+        </div>
+      )}
+      <div style={{ position:"absolute", top:10, right:10, display:"flex", gap:8 }}>
+        {[["#0a66c2","LinkedIn"],["#6c47ff","Apify"],["#16a34a","Local"]].map(([c,l])=>(
+          <div key={l} style={{ display:"flex", alignItems:"center", gap:5, background:"rgba(0,0,0,.5)", borderRadius:6, padding:"3px 8px" }}>
+            <div style={{ width:8,height:8,borderRadius:"50%",background:c }}/>
+            <span style={{ color:"#94a3b8",fontSize:10 }}>{l}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 🤖  AUTOPILOT APPLY PANEL
+// ═══════════════════════════════════════════════════════════════════
+function AutopilotApply({ job, showToast }) {
+  const [phase, setPhase]   = useState("idle"); // idle | scanning | preview | done | error
+  const [fills, setFills]   = useState([]);
+  const [fields, setFields] = useState([]);
+  const [screenshot, setScreenshot] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+
+  async function scan() {
+    if (!job?.url) { showToast("No job URL to scan","error"); return; }
+    setPhase("scanning");
+    try {
+      const token = localStorage.getItem("jobpilot_token");
+      const d = await fetch(`${API}/autopilot-apply`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json","Authorization":"Bearer "+token },
+        body: JSON.stringify({ jobUrl: job.url, jobTitle: job.title, company: job.company }),
+      }).then(r=>r.json());
+      if (!d.ok) { setErrMsg(d.error||"Scan failed"); setPhase("error"); return; }
+      setFills(d.fills||[]); setFields(d.fields||[]); setScreenshot(d.screenshot||null);
+      setPhase("preview");
+    } catch(e) { setErrMsg(e.message); setPhase("error"); }
+  }
+
+  if (phase==="idle") return (
+    <button onClick={scan} style={{ padding:"8px 16px", background:"linear-gradient(135deg,#0ea5e9,#6c47ff)", color:"#fff", border:"none", borderRadius:8, fontWeight:700, fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+      <span>🤖</span> Autopilot Apply
+    </button>
+  );
+
+  if (phase==="scanning") return (
+    <div style={{ padding:"10px 16px", background:"#f0f9ff", borderRadius:8, border:"1px solid #bae6fd", fontSize:12, color:"#0369a1", display:"flex", alignItems:"center", gap:8 }}>
+      <div style={{ width:12,height:12,border:"2px solid #0369a1",borderTopColor:"transparent",borderRadius:"50%",animation:"spin .7s linear infinite" }}/>
+      Scanning application form with Playwright…
+    </div>
+  );
+
+  if (phase==="error") return (
+    <div style={{ padding:"10px 16px", background:"#fef2f2", borderRadius:8, border:"1px solid #fecaca", fontSize:12, color:"#dc2626" }}>
+      ⚠ {errMsg} — <button onClick={()=>setPhase("idle")} style={{ background:"none",border:"none",color:"#dc2626",cursor:"pointer",textDecoration:"underline",fontSize:12 }}>retry</button>
+    </div>
+  );
+
+  if (phase==="preview") return (
+    <div style={{ background:"#f0f9ff", borderRadius:12, border:"1px solid #bae6fd", padding:16, marginTop:8 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+        <span style={{ fontSize:16 }}>🤖</span>
+        <strong style={{ fontSize:13, color:"#0369a1" }}>Autopilot ready to fill {fills.length} fields</strong>
+        <button onClick={()=>setPhase("idle")} style={{ marginLeft:"auto", background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16 }}>×</button>
+      </div>
+      {fills.length > 0 ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
+          {fills.map((f,i)=>(
+            <div key={i} style={{ display:"flex", gap:8, alignItems:"center", background:"#fff", borderRadius:8, padding:"7px 10px", border:"1px solid #e0f2fe" }}>
+              <span style={{ fontSize:11, color:"#64748b", fontWeight:600, minWidth:120, overflow:"hidden", textOverflow:"ellipsis" }}>{f.field}</span>
+              <span style={{ fontSize:11, color:"#1e40af", flex:1 }}>{f.value||"—"}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize:12, color:"#64748b", marginBottom:12 }}>No auto-fillable fields detected. Your profile may need more data in Settings.</div>
+      )}
+      <div style={{ display:"flex", gap:8 }}>
+        <a href={job.url} target="_blank" rel="noreferrer" style={{ background:"#0369a1", color:"#fff", borderRadius:8, padding:"8px 16px", fontSize:12, fontWeight:700, textDecoration:"none" }}>Open & Fill Manually ↗</a>
+        <button onClick={()=>setPhase("idle")} style={{ background:"#f1f5f9", color:"#64748b", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 14px", fontSize:12, fontWeight:600, cursor:"pointer" }}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  return null;
+}
+
 // --- Mock Interview Studio ----------------------------------------------------
 function MockInterviewStudio({ showToast, applications, profile }) {
   const [phase, setPhase]               = useState("setup");
@@ -2595,6 +3337,25 @@ export default function App() {
   const [pipeline, setPipeline]               = useState({});
   const [talkingPoints, setTalkingPoints]     = useState(null);
   const [appStatusFilter, setAppStatusFilter] = useState("all");
+  const [draggingJob, setDraggingJob]         = useState(null);
+  const [dragStageHover, setDragStageHover]   = useState(null);
+  const [bestMatchFilter, setBestMatchFilter] = useState(false);
+  const [jobViewMode, setJobViewMode]         = useState("grid");
+  const [jobsMode, setJobsMode]               = useState("mine"); // "mine" | "search"
+  const [searchQuery, setSearchQuery]         = useState("");
+  const [searchLocation, setSearchLocation]   = useState("");
+  const [searchWorkType, setSearchWorkType]   = useState("all");
+  const [searchDatePosted, setSearchDatePosted] = useState("");
+  const [showWarRoom, setShowWarRoom]           = useState(false);
+  const [warRoomJob, setWarRoomJob]             = useState(null);
+  const [galaxyView, setGalaxyView]             = useState(false);
+  const [searchResults, setSearchResults]     = useState([]);
+  const [searchTotal, setSearchTotal]         = useState(0);
+  const [searchSource, setSearchSource]       = useState("");
+  const [isSearching, setIsSearching]         = useState(false);
+  const [filterLocation, setFilterLocation]   = useState("");
+  const [isListening, setIsListening]         = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
 
   const showToast = (msg, type="success") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
@@ -2625,6 +3386,42 @@ export default function App() {
     try { const d = await apiFetch(`${API}/pipeline`).then(r=>r.json()); setPipeline(d.stages||{}); } catch {}
   }, []);
 
+  const handleJobSearch = async (overrides = {}) => {
+    const q   = (overrides.query      ?? searchQuery).trim();
+    const loc = (overrides.location   ?? searchLocation).trim();
+    const wt  = overrides.workType    ?? searchWorkType;
+    const dp  = overrides.datePosted  ?? searchDatePosted;
+    if (!q && !loc) return;
+    setIsSearching(true); setSearchResults([]);
+    try {
+      const d = await apiFetch(`${API}/search-jobs`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ query:q, location:loc, workType:wt, datePosted:dp }),
+      }).then(r=>r.json());
+      if (d.ok) {
+        setSearchResults(d.jobs||[]); setSearchTotal(d.total||0); setSearchSource(d.source||"");
+        if (overrides._speak && d.jobs?.length && window.speechSynthesis) {
+          const top = d.jobs[0];
+          const msg = `Found ${d.total} jobs for ${q || loc}. Top match: ${top.title} at ${top.company}${top.location ? ", " + top.location : ""}.`;
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(msg), { rate:1.05, pitch:1 }));
+        }
+      } else showToast(d.error||"Search failed","error");
+    } catch { showToast("Search failed","error"); }
+    setIsSearching(false);
+  };
+
+  const handleVoiceResult = (transcript) => {
+    setVoiceTranscript(transcript);
+    const { query, location, workType } = parseVoiceIntent(transcript);
+    setSearchQuery(query);
+    setSearchLocation(location);
+    setSearchWorkType(workType);
+    setJobsMode("search");
+    setTimeout(() => handleJobSearch({ query, location, workType, _speak: true }), 80);
+    setTimeout(() => setVoiceTranscript(""), 5000);
+  };
+
   useEffect(() => {
     if (!authed) return;
     apiFetch(`${API}/ats-companies`).then(r=>r.json()).then(setAtsCompanies).catch(()=>{});
@@ -2650,6 +3447,8 @@ export default function App() {
     if (minScore > 0) jobs = jobs.filter(j=>(j.score||0)>=minScore);
     if (filterPlatform !== "All") jobs = jobs.filter(j=>j.platform===filterPlatform);
     if (filterEasyApply) jobs = jobs.filter(j=>j.easyApply);
+    if (bestMatchFilter) jobs = jobs.filter(j=>(j.score||0)>=3.0);
+    if (filterLocation.trim()) { const loc = filterLocation.trim().toLowerCase(); jobs = jobs.filter(j=>(j.location||"").toLowerCase().includes(loc)); }
     jobs.sort((a,b) => {
       if (sortBy==="score")   return (b.score||0)-(a.score||0);
       if (sortBy==="date")    return new Date(b.savedAt)-new Date(a.savedAt);
@@ -2657,7 +3456,7 @@ export default function App() {
       return 0;
     });
     return jobs;
-  }, [foundJobs, jobSearch, minScore, filterPlatform, filterEasyApply, sortBy]);
+  }, [foundJobs, jobSearch, minScore, filterPlatform, filterEasyApply, sortBy, bestMatchFilter, filterLocation]);
 
   const hotJobs = useMemo(() => foundJobs.filter(j=>j.score>=3.5).slice(0,5), [foundJobs]);
   const statusCounts   = applications.reduce((acc,a) => { acc[a.status]=(acc[a.status]||0)+1; return acc; }, {});
@@ -2711,6 +3510,17 @@ export default function App() {
       }).then(r=>r.json());
       setTalkingPoints({...d, jobTitle:job.title, company:job.company});
     } catch { showToast("Could not generate prep","error"); }
+  };
+
+  const handleTrackJob = async (job, stageKey) => {
+    try {
+      const d = await apiFetch(`${API}/track-job`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ job, status: stageKey }),
+      }).then(r=>r.json());
+      if (d.ok) { fetchPipeline(); fetchApplications(); showToast(`Added to ${stageKey.replace(/-/g," ")}`); }
+      else showToast(d.reason || "Failed to track", "error");
+    } catch { showToast("Cannot reach server", "error"); }
   };
 
   // -- Auth gate ----------------------------------------------------------------
@@ -2970,75 +3780,284 @@ export default function App() {
               );
             })()}
 
-            {/* -- JOBS (split-pane) -------------------------------------------- */}
+            {/* -- JOBS ------------------------------------------------------------ */}
             {tab==="jobs" && (
-              <div style={{ display:"flex", height:"100%", overflow:"hidden" }}>
-                {/* Left: job list */}
-                <div style={{ width:340, flexShrink:0, display:"flex", flexDirection:"column", borderRight:"1px solid #e5e3e0", background:"#fff", overflow:"hidden" }}>
-                  {/* Search */}
-                  <div style={{ padding:"12px 14px", borderBottom:"1px solid #f0eeec" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8, background:"#fafaf9", border:"1.5px solid #e5e3e0", borderRadius:9, padding:"8px 12px" }}>
-                      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#a8a29e" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                      </svg>
-                      <input placeholder="Search jobs�" value={jobSearch}
-                        onChange={e=>{setJobSearch(e.target.value);fetchFoundJobs(e.target.value);}}
-                        style={{ flex:1, background:"transparent", border:"none", color:"#1c1917", fontSize:13, outline:"none" }}/>
-                      <span style={{ fontSize:11, color:"#d6d3d1", flexShrink:0 }}>{displayedJobs.length}</span>
+              <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
+
+                {/* ── Mode tabs + view toggle ── */}
+                <div style={{ flexShrink:0, background:"#fff", borderBottom:"1px solid #e5e3e0", padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div style={{ display:"flex", gap:0 }}>
+                    {[["search","🔍 Search"],["mine","📋 My Jobs"]].map(([m,label]) => (
+                      <button key={m} onClick={()=>{ setJobsMode(m); setSelectedJob(null); }} style={{
+                        padding:"12px 18px", border:"none", borderBottom:`2px solid ${jobsMode===m?"#6c47ff":"transparent"}`,
+                        background:"transparent", color:jobsMode===m?"#6c47ff":"#78716c",
+                        fontWeight:jobsMode===m?700:500, fontSize:13, cursor:"pointer", transition:"all .15s",
+                      }}>{label}</button>
+                    ))}
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    {jobsMode==="mine" && <span style={{ fontSize:11, color:"#a8a29e" }}>{displayedJobs.length} jobs</span>}
+                    {jobsMode==="search" && searchTotal>0 && <span style={{ fontSize:11, color:"#a8a29e" }}>{searchTotal} results</span>}
+                    <div style={{ display:"flex", border:"1px solid #e5e3e0", borderRadius:7, overflow:"hidden" }}>
+                      {[["grid","⊞"],["list","≡"]].map(([m,icon]) => (
+                        <button key={m} onClick={()=>setJobViewMode(m)} style={{
+                          padding:"6px 10px", border:"none", fontSize:15, cursor:"pointer", lineHeight:1,
+                          background:jobViewMode===m?"#6c47ff":"transparent",
+                          color:jobViewMode===m?"#fff":"#78716c", transition:"all .12s",
+                        }}>{icon}</button>
+                      ))}
                     </div>
-                  </div>
-
-                  {/* Filters */}
-                  <div style={{ padding:"8px 12px", borderBottom:"1px solid #f0eeec", display:"flex", gap:6, flexWrap:"wrap" }}>
-                    {[{k:"score",l:"Best match"},{k:"date",l:"Newest"},{k:"company",l:"A�Z"}].map(o => (
-                      <button key={o.k} onClick={()=>setSortBy(o.k)} style={{
-                        padding:"4px 10px", borderRadius:6, border:"1px solid #e5e3e0", fontSize:11, fontWeight:500, cursor:"pointer",
-                        background:sortBy===o.k?"#6c47ff":"transparent",
-                        color:sortBy===o.k?"#fff":"#78716c",
-                      }}>{o.l}</button>
-                    ))}
-                    <button onClick={()=>setFilterEasyApply(v=>!v)} style={{
-                      padding:"4px 10px", borderRadius:6, border:`1px solid ${filterEasyApply?"#bbf7d0":"#e5e3e0"}`,
-                      background:filterEasyApply?"#f0fdf4":"transparent",
-                      color:filterEasyApply?"#16a34a":"#78716c",
-                      fontSize:11, fontWeight:500, cursor:"pointer",
-                    }}>Easy Apply</button>
-                  </div>
-
-                  {/* Platform chips */}
-                  <div style={{ padding:"8px 12px", borderBottom:"1px solid #f5f4f2", display:"flex", gap:5, overflowX:"auto" }}>
-                    {uniquePlatforms.map(p => {
-                      const m = Object.values(PLATFORM_META).find(pm=>pm.label===p);
-                      return (
-                        <button key={p} onClick={()=>setFilterPlatform(p)} style={{
-                          padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:500, cursor:"pointer", whiteSpace:"nowrap",
-                          border:`1px solid ${filterPlatform===p?(m?.color||"#1c1917")+"50":"#e5e3e0"}`,
-                          background:filterPlatform===p?(m?.color||"#1c1917")+"10":"transparent",
-                          color:filterPlatform===p?(m?.color||"#1c1917"):"#78716c",
-                        }}>{p}</button>
-                      );
-                    })}
-                  </div>
-
-                  {/* List */}
-                  <div style={{ flex:1, overflowY:"auto" }}>
-                    {displayedJobs.length===0 && (
-                      <div style={{ padding:"32px 20px", textAlign:"center", color:"#a8a29e", fontSize:13 }}>
-                        {foundJobs.length===0 ? "No jobs yet � start the scanner" : "No matches � adjust filters"}
-                      </div>
-                    )}
-                    {displayedJobs.map(job => (
-                      <JobRow key={job.id} job={job} selected={selectedJob?.id===job.id} onClick={setSelectedJob}/>
-                    ))}
                   </div>
                 </div>
 
-                {/* Right: detail */}
-                <JobDetailPanel job={selectedJob} onApply={handleApplyNow}/>
+                {/* ── SEARCH MODE ── */}
+                {jobsMode==="search" && (
+                  <div style={{ display:"flex", flexDirection:"column", flex:1, overflow:"hidden" }}>
+                    {/* Search hero bar */}
+                    <div style={{ flexShrink:0, background:"linear-gradient(135deg,#f3f0ff 0%,#fff 100%)", borderBottom:"1px solid #e5e3e0", padding:"20px 20px 16px" }}>
+                      <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+                        {/* Keyword */}
+                        <div style={{ flex:1, display:"flex", alignItems:"center", gap:8, background:"#fff", border:"1.5px solid #e5e3e0", borderRadius:10, padding:"10px 14px", boxShadow:"0 1px 4px rgba(0,0,0,.06)" }}>
+                          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#6c47ff" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                          <input
+                            placeholder="Job title or keyword..."
+                            value={searchQuery}
+                            onChange={e=>setSearchQuery(e.target.value)}
+                            onKeyDown={e=>e.key==="Enter"&&handleJobSearch()}
+                            style={{ flex:1, border:"none", background:"transparent", fontSize:14, color:"#1c1917", outline:"none", fontWeight:500 }}
+                          />
+                        </div>
+                        {/* Location */}
+                        <div style={{ width:220, display:"flex", alignItems:"center", gap:8, background:"#fff", border:"1.5px solid #e5e3e0", borderRadius:10, padding:"10px 14px", boxShadow:"0 1px 4px rgba(0,0,0,.06)" }}>
+                          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#a8a29e" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                          <input
+                            placeholder="City, state or remote"
+                            value={searchLocation}
+                            onChange={e=>setSearchLocation(e.target.value)}
+                            onKeyDown={e=>e.key==="Enter"&&handleJobSearch()}
+                            style={{ flex:1, border:"none", background:"transparent", fontSize:13, color:"#1c1917", outline:"none" }}
+                          />
+                        </div>
+                        {/* Mic button */}
+                        <VoiceMicButton
+                          onResult={handleVoiceResult}
+                          disabled={isSearching}
+                          isListening={isListening}
+                        />
+                        {/* AI Search button */}
+                        <button
+                          onClick={()=>handleJobSearch()}
+                          disabled={isSearching||(!searchQuery.trim()&&!searchLocation.trim())}
+                          style={{
+                            padding:"10px 22px", borderRadius:10, border:"none", cursor:"pointer",
+                            background:isSearching||(!searchQuery.trim()&&!searchLocation.trim())?"#e5e3e0":"linear-gradient(135deg,#6c47ff,#8b5cf6)",
+                            color:isSearching||(!searchQuery.trim()&&!searchLocation.trim())?"#a8a29e":"#fff",
+                            fontWeight:700, fontSize:14, display:"flex", alignItems:"center", gap:8,
+                            boxShadow:isSearching?"none":"0 4px 14px rgba(108,71,255,0.4)",
+                            transition:"all .15s", flexShrink:0,
+                          }}
+                        >
+                          {isSearching ? (
+                            <><div style={{ width:14,height:14,border:"2px solid rgba(255,255,255,0.4)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .7s linear infinite" }}/> Searching…</>
+                          ) : (
+                            <><span style={{ fontSize:16 }}>✦</span> AI Search</>
+                          )}
+                        </button>
+                      </div>
+                      {/* Filter pills row */}
+                      <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                        {/* Work type */}
+                        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                          <span style={{ fontSize:11, color:"#a8a29e", fontWeight:500 }}>Work type:</span>
+                          {[["all","All"],["remote","Remote"],["hybrid","Hybrid"],["onsite","Onsite"]].map(([v,l]) => (
+                            <button key={v} onClick={()=>setSearchWorkType(v)} style={{
+                              padding:"4px 12px", borderRadius:20, fontSize:11, fontWeight:600, cursor:"pointer", border:"none",
+                              background:searchWorkType===v?"#6c47ff":"#f3f0ff",
+                              color:searchWorkType===v?"#fff":"#6c47ff",
+                              transition:"all .12s",
+                            }}>{l}</button>
+                          ))}
+                        </div>
+                        {/* Date posted */}
+                        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                          <span style={{ fontSize:11, color:"#a8a29e", fontWeight:500 }}>Posted:</span>
+                          {[["","Any time"],["day","Today"],["week","This week"],["month","This month"]].map(([v,l]) => (
+                            <button key={v} onClick={()=>setSearchDatePosted(v)} style={{
+                              padding:"4px 12px", borderRadius:20, fontSize:11, fontWeight:600, cursor:"pointer", border:"none",
+                              background:searchDatePosted===v?"#0ea5e9":"#e0f2fe",
+                              color:searchDatePosted===v?"#fff":"#0369a1",
+                              transition:"all .12s",
+                            }}>{l}</button>
+                          ))}
+                        </div>
+                        {searchSource && (
+                          <span style={{ marginLeft:"auto", fontSize:10, color:"#a8a29e", background:"#f5f4f2", borderRadius:20, padding:"2px 8px" }}>
+                            via {searchSource}
+                          </span>
+                        )}
+                      </div>
+                      {/* Voice transcript feedback */}
+                      {voiceTranscript && (
+                        <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8, padding:"7px 12px", background:"rgba(255,62,127,.07)", borderRadius:8, border:"1px solid rgba(255,62,127,.2)" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ff3e7f" strokeWidth="2" strokeLinecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                          <span style={{ fontSize:12, color:"#ff3e7f", fontWeight:600 }}>Heard:</span>
+                          <span style={{ fontSize:12, color:"#57534e", fontStyle:"italic" }}>"{voiceTranscript}"</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Search results */}
+                    <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+                      <div style={{ flex:1, overflowY:"auto", padding:"20px", background:"#fafaf9" }}>
+                        {!isSearching && searchResults.length===0 && (
+                          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"100%", gap:16, color:"#a8a29e" }}>
+                            <div style={{ fontSize:48 }}>🔍</div>
+                            <div style={{ fontSize:15, fontWeight:600, color:"#78716c" }}>Search for your next role</div>
+                            <div style={{ fontSize:13, textAlign:"center", maxWidth:340, lineHeight:1.6 }}>
+                              Enter a job title and location above. Results are AI-scored against your profile and ranked by best match.
+                            </div>
+                          </div>
+                        )}
+                        {isSearching && (
+                          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"100%", gap:14 }}>
+                            <div style={{ width:40,height:40,border:"3px solid #ede9fe",borderTopColor:"#6c47ff",borderRadius:"50%",animation:"spin .8s linear infinite" }}/>
+                            <div style={{ fontSize:14, color:"#6c47ff", fontWeight:600 }}>Searching and scoring jobs…</div>
+                          </div>
+                        )}
+                        {!isSearching && searchResults.length>0 && (
+                          <>
+                            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+                              <div style={{ fontSize:12, color:"#a8a29e" }}>
+                                <span style={{ fontWeight:600, color:"#1c1917" }}>{searchTotal}</span> jobs found · sorted by AI match score
+                              </div>
+                              <div style={{ marginLeft:"auto", display:"flex", gap:6 }}>
+                                <button onClick={()=>setGalaxyView(false)} title="Grid view" style={{ padding:"4px 8px", borderRadius:6, border:"1px solid #e5e3e0", background:!galaxyView?"#18181b":"#fff", color:!galaxyView?"#fff":"#57534e", cursor:"pointer", fontSize:13 }}>⊞</button>
+                                <button onClick={()=>setGalaxyView(true)} title="Galaxy view" style={{ padding:"4px 10px", borderRadius:6, border:"1px solid #e5e3e0", background:galaxyView?"#18181b":"#fff", color:galaxyView?"#fff":"#57534e", cursor:"pointer", fontSize:12, fontWeight:600 }}>🌌</button>
+                              </div>
+                            </div>
+                            {galaxyView ? (
+                              <JobGalaxy jobs={searchResults} onSelect={j=>setSelectedJob(prev=>prev?.id===j.id?null:j)}/>
+                            ) : (
+                            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:14 }}>
+                              {searchResults.map(job => (
+                                <JobCard key={job.id||job.url} job={job} selected={selectedJob?.id===job.id||selectedJob?.url===job.url}
+                                  onClick={j=>setSelectedJob(prev=>prev?.id===j.id?null:j)}
+                                  onDragStart={()=>setDraggingJob(job)} onDragEnd={()=>setDraggingJob(null)}/>
+                              ))}
+                            </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {/* Slide-over detail */}
+                      {selectedJob && (
+                        <div style={{ width:480,flexShrink:0,borderLeft:"1px solid #e5e3e0",display:"flex",flexDirection:"column",overflow:"hidden",background:"#fff" }}>
+                          <JobDetailPanel job={selectedJob} onApply={handleApplyNow} onClose={()=>setSelectedJob(null)}
+                            onWarRoom={(job)=>{ setWarRoomJob(job); setShowWarRoom(true); }}/>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── MY JOBS MODE ── */}
+                {jobsMode==="mine" && (
+                  <div style={{ display:"flex", flexDirection:"column", flex:1, overflow:"hidden" }}>
+                    {/* Filters toolbar */}
+                    <div style={{ flexShrink:0, background:"#fff", borderBottom:"1px solid #e5e3e0", padding:"8px 16px", display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, background:"#fafaf9", border:"1.5px solid #e5e3e0", borderRadius:8, padding:"6px 12px", flex:"0 0 auto", minWidth:180 }}>
+                        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#a8a29e" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        <input placeholder="Filter jobs..." value={jobSearch}
+                          onChange={e=>{setJobSearch(e.target.value);fetchFoundJobs(e.target.value);}}
+                          style={{ background:"transparent", border:"none", color:"#1c1917", fontSize:12, outline:"none", width:120 }}/>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, background:"#fafaf9", border:`1.5px solid ${filterLocation?"#6c47ff":"#e5e3e0"}`, borderRadius:8, padding:"6px 12px", flex:"0 0 auto", minWidth:160 }}>
+                        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke={filterLocation?"#6c47ff":"#a8a29e"} strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                        <input placeholder="Location..." value={filterLocation}
+                          onChange={e=>setFilterLocation(e.target.value)}
+                          style={{ background:"transparent", border:"none", color:"#1c1917", fontSize:12, outline:"none", width:100 }}/>
+                        {filterLocation && <button onClick={()=>setFilterLocation("")} style={{ border:"none", background:"none", cursor:"pointer", color:"#a8a29e", fontSize:14, lineHeight:1, padding:0 }}>×</button>}
+                      </div>
+                      {[{k:"score",l:"Best match"},{k:"date",l:"Newest"},{k:"company",l:"A-Z"}].map(o => (
+                        <button key={o.k} onClick={()=>setSortBy(o.k)} style={{
+                          padding:"5px 10px", borderRadius:6, border:"1px solid #e5e3e0", fontSize:11, fontWeight:500, cursor:"pointer",
+                          background:sortBy===o.k?"#6c47ff":"transparent", color:sortBy===o.k?"#fff":"#78716c",
+                        }}>{o.l}</button>
+                      ))}
+                      <button onClick={()=>setFilterEasyApply(v=>!v)} style={{
+                        padding:"5px 10px", borderRadius:6, fontSize:11, fontWeight:500, cursor:"pointer",
+                        border:`1px solid ${filterEasyApply?"#bbf7d0":"#e5e3e0"}`,
+                        background:filterEasyApply?"#f0fdf4":"transparent", color:filterEasyApply?"#16a34a":"#78716c",
+                      }}>Easy Apply</button>
+                      <button onClick={()=>setBestMatchFilter(v=>!v)} style={{
+                        padding:"5px 10px", borderRadius:6, fontSize:11, fontWeight:500, cursor:"pointer",
+                        border:`1px solid ${bestMatchFilter?"#6c47ff40":"#e5e3e0"}`,
+                        background:bestMatchFilter?"#f3f0ff":"transparent", color:bestMatchFilter?"#6c47ff":"#78716c",
+                      }}>⭐ Best Matches</button>
+                      <div style={{ marginLeft:"auto", display:"flex", gap:5, overflowX:"auto" }}>
+                        {uniquePlatforms.map(p => {
+                          const meta = Object.values(PLATFORM_META).find(pm=>pm.label===p);
+                          return (
+                            <button key={p} onClick={()=>setFilterPlatform(p)} style={{
+                              padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:500, cursor:"pointer", whiteSpace:"nowrap",
+                              border:`1px solid ${filterPlatform===p?(meta?.color||"#1c1917")+"50":"#e5e3e0"}`,
+                              background:filterPlatform===p?(meta?.color||"#1c1917")+"10":"transparent",
+                              color:filterPlatform===p?(meta?.color||"#1c1917"):"#78716c",
+                            }}>{p}</button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Jobs content */}
+                    {jobViewMode==="list" ? (
+                      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+                        <div style={{ width:340, flexShrink:0, display:"flex", flexDirection:"column", borderRight:"1px solid #e5e3e0", background:"#fff", overflow:"hidden" }}>
+                          <div style={{ flex:1, overflowY:"auto" }}>
+                            {displayedJobs.length===0 && (
+                              <div style={{ padding:"32px 20px", textAlign:"center", color:"#a8a29e", fontSize:13 }}>
+                                {foundJobs.length===0 ? "No jobs yet — start the scanner" : "No matches — adjust filters"}
+                              </div>
+                            )}
+                            {displayedJobs.map(job => (
+                              <JobRow key={job.id} job={job} selected={selectedJob?.id===job.id} onClick={setSelectedJob}
+                                onDragStart={()=>setDraggingJob(job)} onDragEnd={()=>setDraggingJob(null)}/>
+                            ))}
+                          </div>
+                        </div>
+                        <JobDetailPanel job={selectedJob} onApply={handleApplyNow} onClose={()=>setSelectedJob(null)}/>
+                      </div>
+                    ) : (
+                      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+                        <div style={{ flex:1, overflowY:"auto", padding:"20px", background:"#fafaf9" }}>
+                          {displayedJobs.length===0 && (
+                            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"100%", gap:12, color:"#a8a29e" }}>
+                              <div style={{ fontSize:40 }}>📭</div>
+                              <div style={{ fontSize:13 }}>{foundJobs.length===0 ? "No jobs yet — start the scanner" : "No matches — adjust filters"}</div>
+                            </div>
+                          )}
+                          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:14 }}>
+                            {displayedJobs.map(job => (
+                              <JobCard key={job.id} job={job} selected={selectedJob?.id===job.id}
+                                onClick={j=>setSelectedJob(prev=>prev?.id===j.id?null:j)}
+                                onDragStart={()=>setDraggingJob(job)} onDragEnd={()=>setDraggingJob(null)}/>
+                            ))}
+                          </div>
+                        </div>
+                        {selectedJob && (
+                          <div style={{ width:480, flexShrink:0, borderLeft:"1px solid #e5e3e0", display:"flex", flexDirection:"column", overflow:"hidden", background:"#fff" }}>
+                            <JobDetailPanel job={selectedJob} onApply={handleApplyNow} onClose={()=>setSelectedJob(null)}/>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
               </div>
             )}
 
-            {/* -- PIPELINE ---------------------------------------------------- */}
+                        {/* -- PIPELINE ---------------------------------------------------- */}
             {tab==="pipeline" && (
               <div style={{ height:"100%", overflow:"hidden", display:"flex", flexDirection:"column", background:"#fafaf9" }}>
                 {talkingPoints && (
@@ -3098,6 +4117,8 @@ export default function App() {
             )}
 
             {/* -- APPLICATIONS ------------------------------------------------ */}
+            {tab==="applications" && <GhostingOracle applications={applications}/>}
+
             {tab==="applications" && (() => {
               const STATUS_GROUPS = [
                 { key:"all",         label:"All",          match: ()=>true },
@@ -3535,8 +4556,53 @@ export default function App() {
       {selectedJob && tab==="applications" && (
         <div onClick={()=>setSelectedJob(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.25)", backdropFilter:"blur(2px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 }}>
           <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:700, maxHeight:"90vh", overflowY:"auto", border:"1px solid #e5e3e0", boxShadow:"0 20px 60px rgba(0,0,0,.15)" }}>
-            <JobDetailPanel job={selectedJob} onApply={handleApplyNow} onClose={()=>setSelectedJob(null)}/>
+            <JobDetailPanel job={selectedJob} onApply={handleApplyNow} onClose={()=>setSelectedJob(null)}
+              onWarRoom={(job)=>{ setWarRoomJob(job); setShowWarRoom(true); }}/>
           </div>
+        </div>
+      )}
+
+      {/* -- Interview War Room modal -------------------------------------------- */}
+      {showWarRoom && (
+        <InterviewWarRoom
+          job={warRoomJob}
+          onClose={()=>setShowWarRoom(false)}
+          showToast={showToast}
+          profile={settings?.profile||{}}
+        />
+      )}
+
+      {/* -- Drag-to-Pipeline Dock --------------------------------------------- */}
+      {draggingJob && (
+        <div style={{
+          position:"fixed", bottom:0, left:230, right:0, zIndex:998,
+          background:"rgba(12,10,26,0.96)", backdropFilter:"blur(14px)",
+          borderTop:"2px solid #2d1f5e", padding:"12px 20px",
+          display:"flex", alignItems:"center", gap:10,
+        }}
+          onDragOver={e => e.preventDefault()}
+        >
+          <div style={{ fontSize:12, fontWeight:700, color:"#a78bfa", flexShrink:0, marginRight:4, whiteSpace:"nowrap" }}>
+            Drop to add:
+          </div>
+          {PIPELINE_STAGES.map(s => (
+            <div key={s.key}
+              onDragOver={e => { e.preventDefault(); setDragStageHover(s.key); }}
+              onDragLeave={() => setDragStageHover(null)}
+              onDrop={e => { e.preventDefault(); handleTrackJob(draggingJob, s.key); setDraggingJob(null); setDragStageHover(null); }}
+              style={{
+                flex:1, padding:"10px 6px", borderRadius:9, textAlign:"center",
+                border:`1.5px dashed ${dragStageHover===s.key ? s.color : s.color+"50"}`,
+                background: dragStageHover===s.key ? s.color+"22" : "transparent",
+                cursor:"copy", transition:"all 0.12s",
+                minWidth:0,
+              }}
+            >
+              <div style={{ fontSize:11, fontWeight:600, color: dragStageHover===s.key ? s.color : "#64748b", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {s.label}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
