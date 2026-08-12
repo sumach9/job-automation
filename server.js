@@ -12,6 +12,7 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import { smartApply, detectPlatform, resetSession, scrapeLinkedInEasyApply } from "./src/automation/autoApply.js";
 import { scrapeATSDirect, GREENHOUSE_COMPANIES, LEVER_COMPANIES, ASHBY_COMPANIES, ATS_COMPANY_COUNT } from "./src/scrapers/atsScrapers.js";
+import { scrapeStaffingAgencies, STAFFING_AGENCY_COUNT, STAFFING_AGENCY_NAMES } from "./src/scrapers/staffingScrapers.js";
 import { scoreJob, scoreLabel, scoreColor } from "./src/utils/scorer.js";
 import { generateViralImage } from "./src/utils/imageGen.js";
 import { parseResume } from "./src/utils/resumeParser.js";
@@ -173,7 +174,7 @@ const settings = {
   maxBrowserOpensPerCycle: parseInt(process.env.MAX_BROWSER_OPENS || "50", 10),
   datePostedFilter: process.env.DATE_POSTED_FILTER || "week", // "today" | "week" | "month"
   emailNotifications: process.env.EMAIL_NOTIFICATIONS === "true",
-  platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true, tickbig: true },
+  platforms: { linkedin: true, indeed: true, glassdoor: true, ziprecruiter: true, googlejobs: true, atsDirect: true, tickbig: true, staffing: true },
   tickbigEmail:    process.env.TICKBIG_EMAIL    || "",
   tickbigPassword: process.env.TICKBIG_PASSWORD || "",
   autoApplyEnabled: process.env.AUTO_APPLY_ENABLED === "true",
@@ -730,6 +731,14 @@ async function scrapeATSOnce() {
   return _atsScrapePromise;
 }
 
+// Staffing agency scraping runs once per cycle
+let _staffingScrapePromise = null;
+async function scrapeStaffingOnce(query) {
+  if (_staffingScrapePromise) return _staffingScrapePromise;
+  _staffingScrapePromise = scrapeStaffingAgencies({ query, logFn: log }).finally(() => { _staffingScrapePromise = null; });
+  return _staffingScrapePromise;
+}
+
 function getMockJobs(title, location) {
   const platforms = ["LinkedIn", "Indeed", "Glassdoor", "ZipRecruiter", "Google Jobs"];
   const companies = ["Amazon", "Microsoft", "Meta", "Google", "Expedia"];
@@ -981,7 +990,27 @@ async function runCycle() {
     }
   }
 
-  // ── 4. Retry queued-manual jobs (up to 20 per cycle) ─────────────────────
+  // ── 4. Staffing agencies (Robert Half, Experis, Volt + 14 IT staffing firms) ──
+  if (settings.platforms.staffing !== false) {
+    const primaryTitle = (settings.jobTitles || "data scientist").split(",")[0].trim();
+    log("info", `Staffing: scanning ${STAFFING_AGENCY_COUNT} agencies (${STAFFING_AGENCY_NAMES.slice(0, 4).join(", ")}…)`);
+    try {
+      const staffingJobs = await scrapeStaffingOnce(primaryTitle);
+      log("info", `Staffing: found ${staffingJobs.length} relevant jobs`);
+      stats.found += staffingJobs.length;
+      for (const job of staffingJobs) {
+        saveFoundJob(job);
+        const applied = await applyToJob(job, { maxBrowserOpens });
+        if (applied) newThisCycle++;
+        else stats.skipped++;
+      }
+    } catch (err) {
+      log("error", "Staffing agencies scrape failed", err.message);
+      stats.errors++;
+    }
+  }
+
+  // ── 5. Retry queued-manual jobs (up to 20 per cycle) ─────────────────────
   const queued = applications
     .filter(a => a.status === "queued-manual" && a.url)
     .slice(0, 20);
