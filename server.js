@@ -118,9 +118,17 @@ app.post("/api/upload-resume", upload.single("resume"), async (req, res) => {
 });
 
 // â"€â"€â"€ Serve React build in production â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// Landing page at /
+const landingPage = path.join(__dirname, "public", "landing.html");
+app.get("/", (req, res) => {
+  if (fs.existsSync(landingPage)) return res.sendFile(landingPage);
+  res.redirect("/app");
+});
+
+// React app at /app
 const clientBuild = path.join(__dirname, "client", "dist");
 if (fs.existsSync(clientBuild)) {
-  app.use(express.static(clientBuild));
+  app.use("/app", express.static(clientBuild));
 }
 
 // â"€â"€â"€ Persistent state file â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -3029,8 +3037,8 @@ app.patch("/api/outreach/:index/connected", (req, res) => {
 
 // â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-// Serve React SPA for all non-API routes
-app.get("*", (req, res) => {
+// Serve React SPA for all /app/* routes (client-side routing)
+app.get("/app/*", (req, res) => {
   const index = path.join(clientBuild, "index.html");
   if (fs.existsSync(index)) return res.sendFile(index);
   res.status(404).send("Frontend not built. Run `npm run build` inside /client.");

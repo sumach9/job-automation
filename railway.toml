@@ -8,3 +8,25 @@ healthcheckPath = "/api/status"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+# ── Volume ────────────────────────────────────────────────────────────────────
+# In Railway dashboard: Add a Volume mounted at /app/data
+# Then set this env var in Railway → Variables:
+#   DATABASE_URL=file:/app/data/jobpilot.db
+#
+# ── Required env vars ─────────────────────────────────────────────────────────
+# PORT                  (Railway sets this automatically)
+# ADMIN_USERNAME        admin
+# ADMIN_PASSWORD        (choose a secure password)
+# JWT_SECRET            (long random string)
+# GROQ_API_KEY          gsk_...
+# APIFY_TOKEN           apify_api_...
+# SERPAPI_KEY           ...
+# LINKEDIN_EMAIL        ...
+# LINKEDIN_PASSWORD     ...
+# EMAIL_USER            ...
+# EMAIL_PASS            ...  (Gmail App Password)
+# NOTIFY_EMAIL          ...
+# DATABASE_URL          file:/app/data/jobpilot.db
+# AUTO_APPLY_ENABLED    false  (enable after testing)
+# LOG_LEVEL             info

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIJobPilot — AI Agent That Applies to Jobs for You</title>
+  <meta name="description" content="AIJobPilot finds, scores, and applies to jobs across LinkedIn, Google Jobs, and 30+ ATS platforms — while you sleep. AI mock interviews included.">
+  <style>
+    :root {
+      --bg: #0D1117; --surface: #161B22; --border: #30363D;
+      --muted: #8B949E; --text: #E6EDF3; --heading: #FFFFFF;
+      --violet: #8B5CF6; --violet-l: #A78BFA; --violet-d: #6D28D9;
+      --cyan: #22D3EE; --green: #10B981; --amber: #F59E0B;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      line-height: 1.6; -webkit-font-smoothing: antialiased;
+    }
+    a { text-decoration: none; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: color-mix(in srgb, var(--bg) 85%, transparent);
+      backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 1080px; margin: 0 auto; padding: 14px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo { font-size: 1.05rem; font-weight: 800; color: var(--heading); letter-spacing: -.03em; }
+    .logo span { color: var(--violet); }
+    .nav-right { display: flex; align-items: center; gap: 12px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 0.875rem; font-weight: 600; padding: 8px 18px;
+      border-radius: 8px; transition: opacity .15s, transform .1s; cursor: pointer;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn-ghost { color: var(--text); border: 1px solid var(--border); background: transparent; }
+    .btn-ghost:hover { border-color: var(--muted); color: var(--heading); }
+    .btn-primary { background: var(--violet); color: #fff; border: none; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-lg { font-size: 1rem; padding: 12px 28px; border-radius: 10px; }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 90px 0 70px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center;
+    }
+    @media (max-width: 768px) { .hero { grid-template-columns: 1fr; padding: 60px 0 40px; } .term-wrap { display: none; } }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: .7rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+      color: var(--violet); background: color-mix(in srgb, var(--violet) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--violet) 30%, transparent);
+      padding: 5px 12px; border-radius: 100px; margin-bottom: 20px;
+    }
+    .eyebrow-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    h1 {
+      font-size: clamp(2.2rem, 5vw, 3.5rem); font-weight: 800;
+      color: var(--heading); letter-spacing: -.04em; line-height: 1.1; margin-bottom: 20px;
+    }
+    h1 .accent { color: var(--violet); }
+    .hero-sub { font-size: 1.05rem; color: var(--muted); line-height: 1.75; margin-bottom: 32px; max-width: 480px; }
+    .ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 40px; }
+    .stats { display: flex; gap: 32px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border); }
+    .stat-n { font-size: 1.5rem; font-weight: 800; color: var(--heading); font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+    .stat-l { font-size: .75rem; color: var(--muted); margin-top: 2px; }
+
+    /* ── Terminal ── */
+    .term-wrap { }
+    .terminal {
+      background: #010409; border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.6);
+    }
+    .term-bar {
+      display: flex; align-items: center; gap: 7px;
+      padding: 11px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .dot.r{background:#FF5F57}.dot.y{background:#FEBC2E}.dot.g{background:#28C840}
+    .term-ttl { font-size: .72rem; color: var(--muted); margin: 0 auto; }
+    .term-body { padding: 16px; font-family: 'Menlo','Cascadia Code',monospace; font-size: .77rem; line-height: 1.75; min-height: 260px; }
+    .tl { display: flex; gap: 8px; animation: fi .25s ease both; }
+    .tl.p::before { content:'$'; color: var(--green); flex-shrink: 0; }
+    .tc{color:var(--cyan)}.tg{color:var(--green)}.tv{color:var(--violet-l)}.ta{color:var(--amber)}.tw{color:var(--heading)}.td{color:#484F58}.tm{color:var(--muted)}
+    @keyframes fi { from{opacity:0;transform:translateY(3px)} to{opacity:1;transform:none} }
+
+    /* ── Divider ── */
+    hr { border: none; border-top: 1px solid var(--border); }
+
+    /* ── Section ── */
+    section { padding: 80px 0; }
+    .sec-label { font-size: .7rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--violet); margin-bottom: 10px; }
+    .sec-title { font-size: clamp(1.6rem,3vw,2.2rem); font-weight: 800; color: var(--heading); letter-spacing: -.03em; line-height: 1.2; }
+    .sec-sub { font-size: 1rem; color: var(--muted); margin-top: 10px; max-width: 520px; }
+    .sec-head { margin-bottom: 48px; }
+
+    /* ── Feature grid ── */
+    .feat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+    @media(max-width:768px){.feat-grid{grid-template-columns:1fr}}
+    .feat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 26px; transition: border-color .2s;
+      position: relative; overflow: hidden;
+    }
+    .feat-card:hover { border-color: var(--violet); }
+    .feat-card::before {
+      content:''; position:absolute; top:0; left:0; right:0; height:2px;
+      background: linear-gradient(90deg,var(--violet),var(--cyan));
+      opacity:0; transition: opacity .2s;
+    }
+    .feat-card:hover::before { opacity: 1; }
+    .feat-icon { font-size: 1.6rem; margin-bottom: 14px; }
+    .feat-name { font-size: 1rem; font-weight: 700; color: var(--heading); margin-bottom: 8px; }
+    .feat-desc { font-size: .85rem; color: var(--muted); line-height: 1.65; }
+
+    /* ── How it works ── */
+    .flow { display: flex; align-items: flex-start; gap: 0; justify-content: center; flex-wrap: wrap; }
+    .flow-step { display: flex; flex-direction: column; align-items: center; text-align: center; width: 130px; }
+    .flow-circle {
+      width: 52px; height: 52px; border-radius: 50%;
+      border: 2px solid var(--violet); background: color-mix(in srgb, var(--violet) 12%, transparent);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; margin-bottom: 12px;
+    }
+    .flow-label { font-size: .8rem; font-weight: 700; color: var(--heading); }
+    .flow-sub { font-size: .7rem; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+    .flow-arrow { color: var(--border); font-size: 1.4rem; margin: 0 -4px; padding-top: 14px; flex-shrink: 0; }
+
+    /* ── AI features ── */
+    .ai-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; }
+    @media(max-width:640px){.ai-grid{grid-template-columns:1fr}}
+    .ai-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 22px; display: flex; gap: 16px; transition: border-color .2s, transform .2s;
+    }
+    .ai-card:hover { border-color: var(--violet); transform: translateY(-2px); }
+    .ai-ico { font-size: 1.8rem; flex-shrink: 0; }
+    .ai-name { font-size: .95rem; font-weight: 700; color: var(--heading); margin-bottom: 5px; }
+    .ai-desc { font-size: .82rem; color: var(--muted); line-height: 1.6; }
+    .tag {
+      display: inline-block; margin-top: 10px; font-size: .68rem; font-weight: 600;
+      color: var(--violet); background: color-mix(in srgb,var(--violet) 12%,transparent);
+      border: 1px solid color-mix(in srgb,var(--violet) 25%,transparent);
+      padding: 2px 8px; border-radius: 4px;
+    }
+
+    /* ── Tech pills ── */
+    .tech-rows { display: flex; flex-direction: column; gap: 18px; }
+    .tech-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .tech-lbl { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; min-width: 88px; }
+    .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+    .pill {
+      font-size: .75rem; font-weight: 500; color: var(--text);
+      background: #21262D; border: 1px solid var(--border); padding: 4px 12px; border-radius: 100px;
+    }
+    .pill.hi { color: var(--violet-l); background: color-mix(in srgb,var(--violet) 10%,transparent); border-color: color-mix(in srgb,var(--violet) 30%,transparent); }
+
+    /* ── CTA banner ── */
+    .cta-section { text-align: center; padding: 90px 0; border-top: 1px solid var(--border); }
+    .cta-section h2 { font-size: clamp(1.8rem,4vw,2.6rem); font-weight: 800; color: var(--heading); letter-spacing: -.04em; margin-bottom: 14px; }
+    .cta-section p { font-size: 1.05rem; color: var(--muted); margin-bottom: 36px; }
+    .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+    /* ── Footer ── */
+    footer { border-top: 1px solid var(--border); padding: 24px; text-align: center; font-size: .8rem; color: var(--muted); }
+    footer a { color: var(--violet); }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <span class="logo">AI<span>Job</span>Pilot</span>
+    <div class="nav-right">
+      <a class="btn btn-ghost" href="https://github.com/sumach9/job-automation" target="_blank" rel="noopener">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+        GitHub
+      </a>
+      <a class="btn btn-primary" href="/app">Launch App →</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="container">
+  <div class="hero">
+    <div>
+      <div class="eyebrow"><span class="eyebrow-dot"></span> Open Source · Self-Hosted · YC Applicant</div>
+      <h1>The job hunt,<br><span class="accent">fully automated.</span></h1>
+      <p class="hero-sub">AIJobPilot finds jobs across LinkedIn, Google Jobs, and 30+ ATS platforms, scores them against your resume, and applies — while you sleep. AI mock interviews included.</p>
+      <div class="ctas">
+        <a class="btn btn-primary btn-lg" href="/app">Launch App →</a>
+        <a class="btn btn-ghost btn-lg" href="https://github.com/sumach9/job-automation" target="_blank" rel="noopener">View Source</a>
+      </div>
+      <div class="stats">
+        <div><div class="stat-n">17+</div><div class="stat-l">Job platforms</div></div>
+        <div><div class="stat-n">70B</div><div class="stat-l">AI model params</div></div>
+        <div><div class="stat-n">$0</div><div class="stat-l">SaaS fees</div></div>
+      </div>
+    </div>
+    <div class="term-wrap">
+      <div class="terminal">
+        <div class="term-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <span class="term-ttl">aijobpilot — live</span>
+        </div>
+        <div class="term-body" id="term"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- FEATURES -->
+<section>
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-label">What it does</div>
+      <div class="sec-title">Find. Score. Apply. Repeat.</div>
+      <p class="sec-sub">Every step of the job search loop — automated, tracked, and improving with every run.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🔍</div>
+        <div class="feat-name">Multi-platform search</div>
+        <div class="feat-desc">Scrapes LinkedIn (Apify), Google Jobs, Greenhouse, Lever, Ashby, Robert Half, Experis, Volt, and 14 more staffing agencies simultaneously.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">⭐</div>
+        <div class="feat-name">AI fit scoring</div>
+        <div class="feat-desc">Every job scored 0–5 against your resume and target roles. Only high-fit jobs get applied to — no wasted applications.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🤖</div>
+        <div class="feat-name">Auto-apply</div>
+        <div class="feat-desc">Playwright navigates live application forms. Groq's Llama 3.3-70B reads every field and maps your profile to it, then submits.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">✨</div>
+        <div class="feat-name">SAM Chrome extension</div>
+        <div class="feat-desc">AI assistant button injected next to every textarea on LinkedIn, Indeed, Greenhouse, Lever, Ashby, Workday, and 7 more platforms.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">📊</div>
+        <div class="feat-name">Pipeline CRM</div>
+        <div class="feat-desc">Kanban board tracks every application from discovery to offer. Daily email digest and Google Sheets sync built in.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🎯</div>
+        <div class="feat-name">AI mock interviews</div>
+        <div class="feat-desc">Streaming AI interviewer tailored to each job you applied to. Voice input, real-time scoring, and performance feedback after every session.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr>
+
+<!-- HOW IT WORKS -->
+<section>
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-label">How it works</div>
+      <div class="sec-title">Fully autonomous loop</div>
+      <p class="sec-sub">Runs every N minutes on a scheduler. Zero manual steps.</p>
+    </div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-circle">🌐</div>
+        <div class="flow-label">Scrape</div>
+        <div class="flow-sub">17+ platforms simultaneously</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="flow-circle">⭐</div>
+        <div class="flow-label">Score</div>
+        <div class="flow-sub">0–5 AI fit vs your resume</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="flow-circle">✍️</div>
+        <div class="flow-label">Fill</div>
+        <div class="flow-sub">AI maps profile to every field</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="flow-circle">📨</div>
+        <div class="flow-label">Apply</div>
+        <div class="flow-sub">Playwright submits the form</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="flow-circle">📬</div>
+        <div class="flow-label">Notify</div>
+        <div class="flow-sub">Email digest + Sheets sync</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr>
+
+<!-- AI FEATURES -->
+<section>
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-label">AI feature suite</div>
+      <div class="sec-title">Beyond auto-apply</div>
+      <p class="sec-sub">Four novel AI features built on top of the core automation.</p>
+    </div>
+    <div class="ai-grid">
+      <div class="ai-card">
+        <div class="ai-ico">👻</div>
+        <div>
+          <div class="ai-name">Ghosting Oracle</div>
+          <div class="ai-desc">TF.js binary classifier trained on your own application history. Predicts which applications will go dark before they do.</div>
+          <span class="tag">TensorFlow.js · In-browser ML</span>
+        </div>
+      </div>
+      <div class="ai-card">
+        <div class="ai-ico">🎯</div>
+        <div>
+          <div class="ai-name">Interview War Room</div>
+          <div class="ai-desc">Streaming AI interviewer (Groq Llama 3.3-70B) tailored to the job you applied to. Voice input + live scoring after every session.</div>
+          <span class="tag">SSE · Voice · Groq</span>
+        </div>
+      </div>
+      <div class="ai-card">
+        <div class="ai-ico">🌌</div>
+        <div>
+          <div class="ai-name">Semantic Job Galaxy</div>
+          <div class="ai-desc">Canvas 2D map of your job search results. Jobs placed by seniority and domain with physics repulsion. Hover to inspect, click to apply.</div>
+          <span class="tag">Canvas 2D · Physics</span>
+        </div>
+      </div>
+      <div class="ai-card">
+        <div class="ai-ico">🤖</div>
+        <div>
+          <div class="ai-name">Autopilot Apply</div>
+          <div class="ai-desc">Playwright scans any live job application URL, extracts all form fields from the DOM, and AI maps your profile to each one.</div>
+          <span class="tag">Playwright · Groq</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr>
+
+<!-- TECH STACK -->
+<section>
+  <div class="container">
+    <div class="sec-head">
+      <div class="sec-label">Tech stack</div>
+      <div class="sec-title">Built to run anywhere</div>
+      <p class="sec-sub">Self-hosted. MIT licensed. No vendor lock-in.</p>
+    </div>
+    <div class="tech-rows">
+      <div class="tech-row"><span class="tech-lbl">Backend</span><div class="pills"><span class="pill hi">Node.js 20</span><span class="pill hi">Express</span><span class="pill">SQLite · Prisma</span><span class="pill">node-schedule</span></div></div>
+      <div class="tech-row"><span class="tech-lbl">Frontend</span><div class="pills"><span class="pill hi">React 18</span><span class="pill hi">Vite</span><span class="pill">TensorFlow.js</span><span class="pill">Canvas 2D</span><span class="pill">Web Speech API</span></div></div>
+      <div class="tech-row"><span class="tech-lbl">Automation</span><div class="pills"><span class="pill hi">Playwright</span><span class="pill">Apify</span><span class="pill">Cheerio</span></div></div>
+      <div class="tech-row"><span class="tech-lbl">AI</span><div class="pills"><span class="pill hi">Groq · Llama 3.3-70B</span><span class="pill">Anthropic SDK</span><span class="pill">OpenAI SDK</span></div></div>
+      <div class="tech-row"><span class="tech-lbl">Integrations</span><div class="pills"><span class="pill">Google Sheets API</span><span class="pill">SerpAPI</span><span class="pill">Gmail SMTP</span><span class="pill">17 job portals</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-section">
+  <div class="container">
+    <h2>Ready to automate your job search?</h2>
+    <p>Self-hosted, open source, and free to run. No subscriptions.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary btn-lg" href="/app">Launch App →</a>
+      <a class="btn btn-ghost btn-lg" href="https://github.com/sumach9/job-automation" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</div>
+
+<footer>
+  AIJobPilot · Open Source · MIT License ·
+  <a href="https://github.com/sumach9/job-automation" target="_blank" rel="noopener">github.com/sumach9/job-automation</a>
+</footer>
+
+<script>
+const lines = [
+  { c:'tl p tw', t:'npm start' },
+  { c:'tl tm',   t:'  AIJobPilot — http://localhost:3004' },
+  { c:'tl td',   t:'' },
+  { c:'tl tg',   t:'  ✓ LinkedIn (Apify)     — 14 new jobs' },
+  { c:'tl tg',   t:'  ✓ Google Jobs          —  9 new jobs' },
+  { c:'tl tg',   t:'  ✓ Robert Half          —  5 new jobs' },
+  { c:'tl tg',   t:'  ✓ Greenhouse / Lever   —  7 new jobs' },
+  { c:'tl td',   t:'' },
+  { c:'tl tc',   t:'  Scoring 35 jobs against profile…' },
+  { c:'tl tw',   t:'  ★★★★★  Data Scientist — Stripe' },
+  { c:'tl tw',   t:'  ★★★★☆  ML Engineer   — Figma' },
+  { c:'tl tw',   t:'  ★★★★☆  AI Engineer   — Scale AI' },
+  { c:'tl td',   t:'' },
+  { c:'tl tv',   t:'  → Applying to Stripe (Easy Apply)…' },
+  { c:'tl tg',   t:'  ✓ Applied — saved to pipeline' },
+  { c:'tl td',   t:'' },
+  { c:'tl tm',   t:'  📬 digest sent · Sheets synced' },
+];
+const term = document.getElementById('term');
+let i = 0;
+function next() {
+  if (i >= lines.length) return;
+  const div = document.createElement('div');
+  div.className = lines[i].c;
+  const s = document.createElement('span');
+  s.textContent = lines[i].t;
+  div.appendChild(s);
+  term.appendChild(div);
+  i++;
+  setTimeout(next, i < 3 ? 550 : 200);
+}
+setTimeout(next, 500);
+</script>
+</body>
+</html>
