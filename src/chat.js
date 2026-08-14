@@ -3,7 +3,7 @@
 // POST /api/chat/score-url score a job URL against profile
 import Groq from "groq-sdk";
 import axios from "axios";
-import { scoreJob, scoreLabel } from "../scorer.js";
+import { scoreJob, scoreLabel } from "./utils/scorer.js";
 
 // ── Detect if the message is a workflow trigger ───────────────────────────────
 const WORKFLOW_INTENTS = [
